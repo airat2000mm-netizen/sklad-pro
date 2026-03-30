@@ -252,7 +252,7 @@
       <table>
         <thead><tr>
           <th><input type="checkbox" id="checkAll" onchange="toggleAll(this)" title="Выбрать все"></th>
-          <th onclick="sortBy('id')" style="cursor:pointer"># ⇅</th><th>Фото</th><th onclick="sortBy('name')" style="cursor:pointer">Наименование ⇅</th><th onclick="sortBy('article')" style="cursor:pointer">Артикул ⇅</th><th>Штрихкод</th><th onclick="sortBy('sector')" style="cursor:pointer">Сектор ⇅</th><th onclick="sortBy('qty')" style="cursor:pointer">Склад (шт) ⇅</th><th onclick="sortBy('qty_ozon')" style="cursor:pointer">Ozon FBO ⇅</th><th onclick="sortBy('cost')" style="cursor:pointer">Себест. ⇅</th><th onclick="sortBy('price_ozon')" style="cursor:pointer">Цена Ozon ⇅</th><th onclick="sortBy('qty')" style="cursor:pointer">Сумма ⇅</th><th onclick="sortBy('last_shipment')" style="cursor:pointer">Отгрузка ⇅</th><th>Комментарий</th><th>Действия</th>
+          <th onclick="sortBy('id')" style="cursor:pointer"># ⇅</th><th>Фото</th><th onclick="sortBy('name')" style="cursor:pointer">Наименование ⇅</th><th onclick="sortBy('article')" style="cursor:pointer">Артикул ⇅</th><th>Штрихкод</th><th onclick="sortBy('sector')" style="cursor:pointer">Сектор ⇅</th><th onclick="sortBy('qty')" style="cursor:pointer">Склад (шт) ⇅</th><th onclick="sortBy('qty_ozon')" style="cursor:pointer">Ozon FBO ⇅</th><th onclick="sortBy('cost')" style="cursor:pointer">Себест. ⇅</th><th onclick="sortBy('price_ozon')" style="cursor:pointer">Цена Ozon ⇅</th><th onclick="sortBy('qty')" style="cursor:pointer">Сумма ⇅</th><th>Комментарий</th><th>Действия</th>
         </tr></thead>
         <tbody id="tableBody"></tbody>
       </table>
@@ -627,7 +627,6 @@ function renderTable() {
         <td>${cost}</td>
         <td>${priceOzon}</td>
         <td>${sumCell}</td>
-        <td style="font-size:13px">${shipDate}</td>
         <td style="font-size:13px;max-width:140px">${comment}</td>
         <td><div class="action-btns">
           <button class="btn btn-outline btn-sm" onclick="openEditModal(${p.id})">✏️</button>
@@ -815,27 +814,20 @@ async function processPDF(file, mode, logId) {
   reader.onload = async e => {
     const b64 = e.target.result.split(',')[1];
     const modeText = mode==='shipment' ? 'товарной накладной на отгрузку' : 'акта приёмки товара';
-    const prompt = `Это ${modeText}.
+    const prompt = `Ты обрабатываешь ${modeText}.
 
-Твоя задача: извлечь ТОЛЬКО строки с реальными товарными позициями.
+Извлеки ТОЛЬКО реальные товарные позиции. Игнорируй итоги, заголовки, реквизиты, НДС, пустые строки.
 
-Признаки товарной позиции:
-- Имеет наименование (название товара или продукта)
-- Имеет количество (число штук, единиц, упаковок)
-- Может иметь артикул, штрихкод, единицу измерения
+Точный маппинг колонок:
+- "Название товара" → name
+- "Артикул" → article  
+- "Barcode" → barcode (строка, не число!)
+- "Доступно к продаже по схеме FBO, шт." → qty_ozon
+- "Текущая цена с учетом скидки, ₽" → price_ozon
+- Количество из накладной (если это накладная) → qty, иначе qty = 0
 
-НЕ включай в результат:
-- Итоговые строки (Итого, Всего, Сумма, НДС, Итого с НДС, В том числе)
-- Заголовки таблиц и колонок
-- Реквизиты организаций (название, ИНН, адрес, телефон)
-- Номера и даты документов
-- Строки с нулевым или отсутствующим количеством
-- Пустые и служебные строки
-
-Если артикул или штрихкод есть в документе — обязательно включи их.
-
-Ответь ТОЛЬКО валидным JSON без пояснений и без markdown:
-{"items":[{"name":"полное название товара","qty":число,"article":"артикул или null","barcode":"штрихкод или null"}]}`;
+Ответь ТОЛЬКО валидным JSON без markdown и пояснений:
+{"items":[{"name":"название","qty":0,"qty_ozon":число или null,"article":"артикул или null","barcode":"штрихкод строкой или null","price_ozon":число или null}]}`;
     try {
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method:'POST',
@@ -1023,14 +1015,21 @@ async function importRows(rows) {
   try {
     if (rows.length < 2) { log('importLog','red','Файл пустой или только заголовок'); return; }
     const h = rows[0].map(c => String(c).toLowerCase());
-    const nC  = h.findIndex(c => c.includes('наимен')||c.includes('товар')||c.includes('name'));
+    // --- Универсальное распознавание колонок (Ozon остатки + Ozon шаблон + свои файлы) ---
+    const nC  = h.findIndex(c => c.includes('название товара')||c.includes('наимен')||c.includes('name'));
     const sC  = h.findIndex(c => c.includes('сектор')||c.includes('место')||c.includes('полка')||c.includes('зона'));
-    const qC  = h.findIndex(c => c.includes('доступно')||c.includes('склад')||c.includes('кол')||c.includes('штук')||c.includes('qty'));
-    const qOC = h.findIndex(c => c.includes('fbo')||c.includes('озон')||c.includes('ozon')||c.includes('продаж'));
-    const pC  = h.findIndex(c => c.includes('фото')||c.includes('photo')||c.includes('img'));
-    const aC  = h.findIndex(c => c.includes('артикул')||c.includes('article')||c.includes('арт'));
-    const bC  = h.findIndex(c => c.includes('штрихкод')||c.includes('barcode')||c.includes('ean')||c.includes('баркод'));
-    const prC = h.findIndex(c => c.includes('цена')||c.includes('price')||c.includes('стоимост'));
+    // FBO остатки: "доступно к продаже по схеме fbo"
+    const qOC = h.findIndex(c => c.includes('fbo'));
+    // Склад: только если явно указан, иначе 0
+    const qC  = h.findIndex(c => (c.includes('склад')||c.includes('qty')) && !c.includes('fbo') && !c.includes('fbs') && !c.includes('резерв'));
+    // Фото: "ссылка на главное фото" (шаблон Ozon) или просто "фото"
+    const pC  = h.findIndex(c => c.includes('главное фото')||c.includes('фото')||c.includes('photo')||c.includes('img'));
+    // Артикул: "артикул*" или просто "артикул"
+    const aC  = h.findIndex(c => c.replace('*','').trim() === 'артикул' || c.includes('артикул') || c.includes('article'));
+    // Штрихкод: "barcode", "штрихкод (серийный номер / ean)", "штрихкод"
+    const bC  = h.findIndex(c => c === 'barcode' || c.includes('штрихкод') || c.includes('ean') || c.includes('серийный'));
+    // Цена: "текущая цена с учетом скидки" (остатки) или "цена, руб.*" (шаблон)
+    const prC = h.findIndex(c => c.includes('текущая цена')||c.includes('цена с учетом')||(c.includes('цена') && c.includes('руб') && !c.includes('до скидки')));
     const coC = h.findIndex(c => c.includes('себестоим')||c.includes('cost')||c.includes('закуп'));
     if (nC < 0) { log('importLog','red','Не найдена колонка «Наименование»'); return; }
     if (sC < 0) { log('importLog','yellow','Колонка «Сектор» не найдена — будет «Не указан»'); }
@@ -1040,13 +1039,16 @@ async function importRows(rows) {
     for (let i = 1; i < rows.length; i++) {
       const name     = String(rows[i][nC]||'').trim();
       const sector   = sC  >= 0 ? String(rows[i][sC]||'').trim()||'Не указан' : 'Не указан';
-      const qty      = qC  >= 0 ? parseInt(rows[i][qC])||0  : 0;
+      // qty (warehouse) = 0 by default when importing from Ozon
+      const qty      = qC  >= 0 ? parseInt(rows[i][qC])||0 : 0;
+      // qty_ozon = "Доступно к продаже по схеме FBO, шт."
       const qty_ozon = qOC >= 0 ? parseInt(rows[i][qOC])||0 : 0;
       const photo    = pC  >= 0 ? String(rows[i][pC]||'').trim()||null : null;
       const article  = aC  >= 0 ? String(rows[i][aC]||'').trim()||null : null;
+      // barcode must be string (too large for integer)
       const barcode  = bC  >= 0 ? String(rows[i][bC]||'').trim()||null : null;
-      const price_ozon = prC >= 0 ? parseFloat(String(rows[i][prC]).replace(/[^0-9.]/g,''))||0 : 0;
-      const cost     = coC >= 0 ? parseFloat(String(rows[i][coC]).replace(/[^0-9.]/g,''))||0 : 0;
+      const price_ozon = prC >= 0 ? parseFloat(String(rows[i][prC]).replace(/[^0-9.,]/g,'').replace(',','.'))||0 : 0;
+      const cost     = coC >= 0 ? parseFloat(String(rows[i][coC]).replace(/[^0-9.,]/g,'').replace(',','.'))||0 : 0;
       if (!name) { skipped++; continue; }
       const existing = _products.find(p => p.name.toLowerCase() === name.toLowerCase()
         || (article && p.article && p.article === article)
