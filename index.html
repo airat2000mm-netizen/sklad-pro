@@ -165,6 +165,7 @@
   <div class="header-stats">
     <div class="stat"><div class="stat-val" id="totalProducts">0</div><div class="stat-label">Позиций</div></div>
     <div class="stat"><div class="stat-val" id="totalQty">0</div><div class="stat-label">Единиц</div></div>
+    <div class="stat"><div class="stat-val" id="totalValue" style="color:var(--green)">0 ₽</div><div class="stat-label">Сумма склада</div></div>
     <div class="stat"><div class="stat-val" id="lowStockCount" style="color:var(--red)">0</div><div class="stat-label">Критично</div></div>
   </div>
 </header>
@@ -206,7 +207,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>#</th><th>Фото</th><th>Наименование</th><th>Сектор</th><th>Остаток (шт)</th><th>Действия</th></tr></thead>
+        <thead><tr><th>#</th><th>Фото</th><th>Наименование</th><th>Сектор</th><th>Остаток</th><th>Себест.</th><th>Цена</th><th>Сумма</th><th>Отгрузка</th><th>Комментарий</th><th>Действия</th></tr></thead>
         <tbody id="tableBody"></tbody>
       </table>
       <div id="emptyState" class="empty" style="display:none">
@@ -289,6 +290,12 @@
     <div class="form-group"><label class="form-label">Наименование *</label><input class="form-input" id="fName" placeholder="Например: Ноутбук ASUS VivoBook 15"></div>
     <div class="form-group"><label class="form-label">Сектор хранения *</label><input class="form-input" id="fSector" placeholder="Например: A1, Полка-3"></div>
     <div class="form-group"><label class="form-label">Количество (шт)</label><input class="form-input" id="fQty" type="number" min="0" placeholder="0"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Себестоимость (₽)</label><input class="form-input" id="fCost" type="number" min="0" step="0.01" placeholder="0"></div>
+      <div class="form-group"><label class="form-label">Цена продажи (₽)</label><input class="form-input" id="fPrice" type="number" min="0" step="0.01" placeholder="0"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Дата последней отгрузки</label><input class="form-input" id="fShipment" type="date"></div>
+    <div class="form-group"><label class="form-label">Комментарий</label><input class="form-input" id="fComment" placeholder="Любые заметки по товару"></div>
     <div class="form-group"><label class="form-label">Фото (URL)</label><input class="form-input" id="fPhoto" placeholder="https://..."></div>
     <input type="hidden" id="fId">
     <div class="modal-btns">
@@ -353,7 +360,11 @@ async function sbInsertOne(row) {
   const r = await fetch(`${SB_URL}/rest/v1/products`, {
     method: 'POST',
     headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
-    body: JSON.stringify({ name: row.name, sector: row.sector, qty: row.qty || 0, photo: row.photo || null })
+    body: JSON.stringify({
+      name: row.name, sector: row.sector, qty: row.qty || 0, photo: row.photo || null,
+      cost: row.cost || 0, price: row.price || 0,
+      last_shipment: row.last_shipment || null, comment: row.comment || null
+    })
   });
   if (!r.ok) throw new Error(await r.text());
   const data = await r.json();
@@ -472,12 +483,23 @@ function renderTable() {
       const img = p.photo
         ? `<img src="${p.photo}" class="product-img" onerror="this.style.display='none'">`
         : `<div class="img-placeholder">📷</div>`;
+      const sum = (p.cost || 0) * p.qty;
+      const cost = p.cost ? `${Number(p.cost).toLocaleString('ru')} ₽` : '<span style="color:var(--text3)">—</span>';
+      const price = p.price ? `${Number(p.price).toLocaleString('ru')} ₽` : '<span style="color:var(--text3)">—</span>';
+      const sumCell = sum ? `<span style="color:var(--green);font-weight:600">${sum.toLocaleString('ru')} ₽</span>` : '<span style="color:var(--text3)">—</span>';
+      const shipDate = p.last_shipment ? new Date(p.last_shipment).toLocaleDateString('ru') : '<span style="color:var(--text3)">—</span>';
+      const comment = p.comment ? `<span title="${p.comment}" style="color:var(--text2);cursor:help">${p.comment.length>20?p.comment.slice(0,20)+'…':p.comment}</span>` : '<span style="color:var(--text3)">—</span>';
       return `<tr>
         <td class="num-cell">${i+1}</td>
         <td>${img}</td>
         <td><strong>${p.name}</strong></td>
         <td><span class="sector-badge">${p.sector}</span></td>
         <td><span class="qty ${cls}">${p.qty}</span></td>
+        <td>${cost}</td>
+        <td>${price}</td>
+        <td>${sumCell}</td>
+        <td style="font-size:13px">${shipDate}</td>
+        <td style="font-size:13px;max-width:140px">${comment}</td>
         <td><div class="action-btns">
           <button class="btn btn-outline btn-sm" onclick="openEditModal(${p.id})">✏️</button>
           <button class="btn btn-sm" style="background:rgba(255,92,92,0.15);color:var(--red);border:1px solid rgba(255,92,92,0.3)" onclick="removeProduct(${p.id})">🗑</button>
@@ -495,6 +517,8 @@ function renderTable() {
   // stats
   document.getElementById('totalProducts').textContent = _products.length;
   document.getElementById('totalQty').textContent = _products.reduce((s,p) => s+p.qty, 0);
+  const totalVal = _products.reduce((s,p) => s + (p.cost||0)*p.qty, 0);
+  document.getElementById('totalValue').textContent = totalVal.toLocaleString('ru') + ' ₽';
   document.getElementById('lowStockCount').textContent = _products.filter(p => p.qty <= 5).length;
 }
 
@@ -507,6 +531,10 @@ function openAddModal(name='', qty=0) {
   document.getElementById('fName').value = name;
   document.getElementById('fSector').value = '';
   document.getElementById('fQty').value = qty;
+  document.getElementById('fCost').value = '';
+  document.getElementById('fPrice').value = '';
+  document.getElementById('fShipment').value = '';
+  document.getElementById('fComment').value = '';
   document.getElementById('fPhoto').value = '';
   document.getElementById('fId').value = '';
   document.getElementById('modalAdd').classList.add('open');
@@ -520,29 +548,39 @@ function openEditModal(id) {
   document.getElementById('fName').value = p.name;
   document.getElementById('fSector').value = p.sector;
   document.getElementById('fQty').value = p.qty;
+  document.getElementById('fCost').value = p.cost || '';
+  document.getElementById('fPrice').value = p.price || '';
+  document.getElementById('fShipment').value = p.last_shipment || '';
+  document.getElementById('fComment').value = p.comment || '';
   document.getElementById('fPhoto').value = p.photo || '';
   document.getElementById('fId').value = p.id;
   document.getElementById('modalAdd').classList.add('open');
 }
 
 async function saveProduct() {
-  const name   = document.getElementById('fName').value.trim();
-  const sector = document.getElementById('fSector').value.trim();
-  const qty    = parseInt(document.getElementById('fQty').value) || 0;
-  const photo  = document.getElementById('fPhoto').value.trim();
-  const id     = document.getElementById('fId').value;
+  const name     = document.getElementById('fName').value.trim();
+  const sector   = document.getElementById('fSector').value.trim();
+  const qty      = parseInt(document.getElementById('fQty').value) || 0;
+  const cost     = parseFloat(document.getElementById('fCost').value) || 0;
+  const price    = parseFloat(document.getElementById('fPrice').value) || 0;
+  const shipment = document.getElementById('fShipment').value || null;
+  const comment  = document.getElementById('fComment').value.trim() || null;
+  const photo    = document.getElementById('fPhoto').value.trim() || null;
+  const id       = document.getElementById('fId').value;
 
   if (!name || !sector) { toast('❌ Заполните наименование и сектор', true); return; }
+
+  const fields = { name, sector, qty, cost, price, last_shipment: shipment, comment, photo };
 
   loading(true);
   try {
     if (id) {
-      await sbUpdate(parseInt(id), { name, sector, qty, photo: photo || null });
+      await sbUpdate(parseInt(id), fields);
       const p = _products.find(x => x.id == id);
-      if (p) Object.assign(p, { name, sector, qty, photo });
+      if (p) Object.assign(p, fields);
       toast('✅ Товар обновлён');
     } else {
-      const newP = await sbInsertOne({ name, sector, qty, photo });
+      const newP = await sbInsertOne(fields);
       _products.push(newP);
       toast('✅ Товар добавлен на склад');
     }
