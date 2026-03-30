@@ -931,44 +931,42 @@ function parseCsv(text) {
 }
 
 async function importRows(rows) {
-  if (rows.length<2){log('importLog','red','Файл пустой');return;}
-      const h = rows[0].map(c=>String(c).toLowerCase());
-      const nC=h.findIndex(c=>c.includes('наимен')||c.includes('товар')||c.includes('name'));
-      const sC=h.findIndex(c=>c.includes('сектор')||c.includes('место')||c.includes('полка')||c.includes('зона'));
-      const qC=h.findIndex(c=>c.includes('кол')||c.includes('штук')||c.includes('qty')||c.includes('остат'));
-      const pC=h.findIndex(c=>c.includes('фото')||c.includes('photo')||c.includes('img'));
-      const aC=h.findIndex(c=>c.includes('артикул')||c.includes('article')||c.includes('арт'));
-      const bC=h.findIndex(c=>c.includes('штрихкод')||c.includes('barcode')||c.includes('ean')||c.includes('баркод'));
-      if(nC<0){log('importLog','red','Не найдена колонка «Наименование»');return;}
-      if(sC<0){log('importLog','yellow','Колонка «Сектор» не найдена — будет подставлено «Не указан»');}
-      const toInsert=[];
-      let skipped=0;
-      for(let i=1;i<rows.length;i++){
-        const name=String(rows[i][nC]||'').trim();
-        const sector=sC>=0?String(rows[i][sC]||'').trim()||'Не указан':'Не указан';
-        const qty=qC>=0?parseInt(rows[i][qC])||0:0;
-        const photo=pC>=0?String(rows[i][pC]||'').trim():'';
-        const article=aC>=0?String(rows[i][aC]||'').trim()||null:null;
-        const barcode=bC>=0?String(rows[i][bC]||'').trim()||null:null;
-        if(!name){skipped++;continue;}
-        if(_products.find(p=>p.name.toLowerCase()===name.toLowerCase())){
-          log('importLog','yellow',`Пропущен (уже есть): <span class="log-name">${name}</span>`);
-          skipped++;continue;
-        }
-        toInsert.push({name,sector,qty,photo:photo||null,article,barcode});
+  try {
+    if (rows.length < 2) { log('importLog','red','Файл пустой или только заголовок'); return; }
+    const h = rows[0].map(c => String(c).toLowerCase());
+    const nC = h.findIndex(c => c.includes('наимен')||c.includes('товар')||c.includes('name'));
+    const sC = h.findIndex(c => c.includes('сектор')||c.includes('место')||c.includes('полка')||c.includes('зона'));
+    const qC = h.findIndex(c => c.includes('кол')||c.includes('штук')||c.includes('qty')||c.includes('остат'));
+    const pC = h.findIndex(c => c.includes('фото')||c.includes('photo')||c.includes('img'));
+    const aC = h.findIndex(c => c.includes('артикул')||c.includes('article')||c.includes('арт'));
+    const bC = h.findIndex(c => c.includes('штрихкод')||c.includes('barcode')||c.includes('ean')||c.includes('баркод'));
+    if (nC < 0) { log('importLog','red','Не найдена колонка «Наименование»'); return; }
+    if (sC < 0) { log('importLog','yellow','Колонка «Сектор» не найдена — будет подставлено «Не указан»'); }
+    const toInsert = [];
+    let skipped = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const name    = String(rows[i][nC]||'').trim();
+      const sector  = sC >= 0 ? String(rows[i][sC]||'').trim()||'Не указан' : 'Не указан';
+      const qty     = qC >= 0 ? parseInt(rows[i][qC])||0 : 0;
+      const photo   = pC >= 0 ? String(rows[i][pC]||'').trim() : '';
+      const article = aC >= 0 ? String(rows[i][aC]||'').trim()||null : null;
+      const barcode = bC >= 0 ? String(rows[i][bC]||'').trim()||null : null;
+      if (!name) { skipped++; continue; }
+      if (_products.find(p => p.name.toLowerCase() === name.toLowerCase())) {
+        log('importLog','yellow',`Пропущен (уже есть): <span class="log-name">${name}</span>`);
+        skipped++; continue;
       }
-      if(toInsert.length){
-        const data = await sbInsertMany(toInsert);
-        data.forEach(p=>{_products.push(p);log('importLog','green',`Добавлен: <span class="log-name">${p.name}</span> — ${p.sector}, ${p.qty} шт`);});
-      }
-      saveLocal();renderTable();
-      log('importLog','blue','— — —');
-      log('importLog','green',`✅ Добавлено: ${toInsert.length} | Пропущено: ${skipped}`);
-      toast(`✅ Импортировано ${toInsert.length} товаров`);
-    } catch(err){log('importLog','red','Ошибка: '+err.message);}
-  };
-  reader.readAsArrayBuffer(file);
-
+      toInsert.push({name, sector, qty, photo: photo||null, article, barcode});
+    }
+    if (toInsert.length) {
+      const data = await sbInsertMany(toInsert);
+      data.forEach(p => { _products.push(p); log('importLog','green',`Добавлен: <span class="log-name">${p.name}</span> — ${p.sector}, ${p.qty} шт`); });
+    }
+    saveLocal(); renderTable();
+    log('importLog','blue','— — —');
+    log('importLog','green',`✅ Добавлено: ${toInsert.length} | Пропущено: ${skipped}`);
+    toast(`✅ Импортировано ${toInsert.length} товаров`);
+  } catch(err) { log('importLog','red','Ошибка: ' + err.message); }
 }
 
 
