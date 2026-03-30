@@ -207,7 +207,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>#</th><th>Фото</th><th>Наименование</th><th>Сектор</th><th>Остаток</th><th>Себест.</th><th>Цена</th><th>Сумма</th><th>Отгрузка</th><th>Комментарий</th><th>Действия</th></tr></thead>
+        <thead><tr><th>#</th><th>Фото</th><th>Наименование</th><th>Артикул</th><th>Штрихкод</th><th>Сектор</th><th>Остаток</th><th>Себест.</th><th>Цена</th><th>Сумма</th><th>Отгрузка</th><th>Комментарий</th><th>Действия</th></tr></thead>
         <tbody id="tableBody"></tbody>
       </table>
       <div id="emptyState" class="empty" style="display:none">
@@ -288,6 +288,10 @@
     <div class="modal-title" id="modalAddTitle">Новый товар</div>
     <div class="modal-sub" id="modalAddSub">Заполните данные для добавления позиции на склад</div>
     <div class="form-group"><label class="form-label">Наименование *</label><input class="form-input" id="fName" placeholder="Например: Ноутбук ASUS VivoBook 15"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Артикул Ozon</label><input class="form-input" id="fArticle" placeholder="Например: 123456789"></div>
+      <div class="form-group"><label class="form-label">Штрихкод Ozon</label><input class="form-input" id="fBarcode" placeholder="Например: 2037804611796"></div>
+    </div>
     <div class="form-group"><label class="form-label">Сектор хранения *</label><input class="form-input" id="fSector" placeholder="Например: A1, Полка-3"></div>
     <div class="form-group"><label class="form-label">Количество (шт)</label><input class="form-input" id="fQty" type="number" min="0" placeholder="0"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -363,7 +367,8 @@ async function sbInsertOne(row) {
     body: JSON.stringify({
       name: row.name, sector: row.sector, qty: row.qty || 0, photo: row.photo || null,
       cost: row.cost || 0, price: row.price || 0,
-      last_shipment: row.last_shipment || null, comment: row.comment || null
+      last_shipment: row.last_shipment || null, comment: row.comment || null,
+      article: row.article || null, barcode: row.barcode || null
     })
   });
   if (!r.ok) throw new Error(await r.text());
@@ -489,10 +494,14 @@ function renderTable() {
       const sumCell = sum ? `<span style="color:var(--green);font-weight:600">${sum.toLocaleString('ru')} ₽</span>` : '<span style="color:var(--text3)">—</span>';
       const shipDate = p.last_shipment ? new Date(p.last_shipment).toLocaleDateString('ru') : '<span style="color:var(--text3)">—</span>';
       const comment = p.comment ? `<span title="${p.comment}" style="color:var(--text2);cursor:help">${p.comment.length>20?p.comment.slice(0,20)+'…':p.comment}</span>` : '<span style="color:var(--text3)">—</span>';
+      const article = p.article ? `<span style="font-family:monospace;font-size:12px;color:var(--accent)">${p.article}</span>` : '<span style="color:var(--text3)">—</span>';
+      const barcode = p.barcode ? `<span style="font-family:monospace;font-size:12px;color:var(--text2)">${p.barcode}</span>` : '<span style="color:var(--text3)">—</span>';
       return `<tr>
         <td class="num-cell">${i+1}</td>
         <td>${img}</td>
         <td><strong>${p.name}</strong></td>
+        <td>${article}</td>
+        <td>${barcode}</td>
         <td><span class="sector-badge">${p.sector}</span></td>
         <td><span class="qty ${cls}">${p.qty}</span></td>
         <td>${cost}</td>
@@ -529,6 +538,8 @@ function openAddModal(name='', qty=0) {
   document.getElementById('modalAddTitle').textContent = 'Новый товар';
   document.getElementById('modalAddSub').textContent = 'Заполните данные для добавления позиции на склад';
   document.getElementById('fName').value = name;
+  document.getElementById('fArticle').value = '';
+  document.getElementById('fBarcode').value = '';
   document.getElementById('fSector').value = '';
   document.getElementById('fQty').value = qty;
   document.getElementById('fCost').value = '';
@@ -546,6 +557,8 @@ function openEditModal(id) {
   document.getElementById('modalAddTitle').textContent = 'Редактировать товар';
   document.getElementById('modalAddSub').textContent = 'Измените данные и сохраните';
   document.getElementById('fName').value = p.name;
+  document.getElementById('fArticle').value = p.article || '';
+  document.getElementById('fBarcode').value = p.barcode || '';
   document.getElementById('fSector').value = p.sector;
   document.getElementById('fQty').value = p.qty;
   document.getElementById('fCost').value = p.cost || '';
@@ -559,6 +572,8 @@ function openEditModal(id) {
 
 async function saveProduct() {
   const name     = document.getElementById('fName').value.trim();
+  const article  = document.getElementById('fArticle').value.trim() || null;
+  const barcode  = document.getElementById('fBarcode').value.trim() || null;
   const sector   = document.getElementById('fSector').value.trim();
   const qty      = parseInt(document.getElementById('fQty').value) || 0;
   const cost     = parseFloat(document.getElementById('fCost').value) || 0;
@@ -570,7 +585,7 @@ async function saveProduct() {
 
   if (!name || !sector) { toast('❌ Заполните наименование и сектор', true); return; }
 
-  const fields = { name, sector, qty, cost, price, last_shipment: shipment, comment, photo };
+  const fields = { name, article, barcode, sector, qty, cost, price, last_shipment: shipment, comment, photo };
 
   loading(true);
   try {
@@ -844,10 +859,14 @@ async function processImportFile(file) {
 }
 
 function downloadTemplate() {
-  const ws_data=[['Наименование','Сектор','Количество','Фото (URL)'],['Ноутбук ASUS VivoBook 15','A1',10,''],['Мышь Logitech M185','B2',25,''],['Клавиатура Defender','B2',12,'']];
+  const ws_data=[
+    ['Наименование','Артикул Ozon','Штрихкод Ozon','Сектор','Количество','Себестоимость','Цена продажи','Фото (URL)'],
+    ['Ноутбук ASUS VivoBook 15','123456789','2037804611796','A1',10,15000,25000,''],
+    ['Мышь Logitech M185','987654321','2037804611797','B2',25,500,1200,''],
+  ];
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(ws_data);
-  ws['!cols']=[{wch:35},{wch:15},{wch:15},{wch:40}];
+  ws['!cols']=[{wch:35},{wch:15},{wch:18},{wch:12},{wch:12},{wch:15},{wch:15},{wch:40}];
   XLSX.utils.book_append_sheet(wb,ws,'Товары');
   XLSX.writeFile(wb,'шаблон_склад.xlsx');
 }
