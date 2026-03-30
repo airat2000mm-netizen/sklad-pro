@@ -227,7 +227,7 @@
       <table>
         <thead><tr>
           <th><input type="checkbox" id="checkAll" onchange="toggleAll(this)" title="Выбрать все"></th>
-          <th>#</th><th>Фото</th><th>Наименование</th><th>Артикул</th><th>Штрихкод</th><th>Сектор</th><th>Остаток</th><th>Себест.</th><th>Цена</th><th>Сумма</th><th>Отгрузка</th><th>Комментарий</th><th>Действия</th>
+          <th onclick="sortBy('id')" style="cursor:pointer"># ⇅</th><th>Фото</th><th onclick="sortBy('name')" style="cursor:pointer">Наименование ⇅</th><th onclick="sortBy('article')" style="cursor:pointer">Артикул ⇅</th><th>Штрихкод</th><th onclick="sortBy('sector')" style="cursor:pointer">Сектор ⇅</th><th onclick="sortBy('qty')" style="cursor:pointer">Склад (шт) ⇅</th><th onclick="sortBy('qty_ozon')" style="cursor:pointer">Ozon FBO ⇅</th><th onclick="sortBy('cost')" style="cursor:pointer">Себест. ⇅</th><th onclick="sortBy('price_ozon')" style="cursor:pointer">Цена Ozon ⇅</th><th onclick="sortBy('qty')" style="cursor:pointer">Сумма ⇅</th><th onclick="sortBy('last_shipment')" style="cursor:pointer">Отгрузка ⇅</th><th>Комментарий</th><th>Действия</th>
         </tr></thead>
         <tbody id="tableBody"></tbody>
       </table>
@@ -324,11 +324,8 @@
       <div class="form-group"><label class="form-label">Штрихкод Ozon</label><input class="form-input" id="fBarcode" placeholder="Например: 2037804611796"></div>
     </div>
     <div class="form-group"><label class="form-label">Сектор хранения *</label><input class="form-input" id="fSector" placeholder="Например: A1, Полка-3"></div>
-    <div class="form-group"><label class="form-label">Количество (шт)</label><input class="form-input" id="fQty" type="number" min="0" placeholder="0"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="form-group"><label class="form-label">Себестоимость (₽)</label><input class="form-input" id="fCost" type="number" min="0" step="0.01" placeholder="0"></div>
-      <div class="form-group"><label class="form-label">Цена продажи (₽)</label><input class="form-input" id="fPrice" type="number" min="0" step="0.01" placeholder="0"></div>
-    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="form-group"><label class="form-label">Склад (шт)</label><input class="form-input" id="fQty" type="number" min="0" placeholder="0"></div><div class="form-group"><label class="form-label">Ozon FBO (шт)</label><input class="form-input" id="fQtyOzon" type="number" min="0" placeholder="0"></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="form-group"><label class="form-label">Себестоимость (₽)</label><input class="form-input" id="fCost" type="number" min="0" step="0.01" placeholder="0"></div><div class="form-group"><label class="form-label">Цена Ozon (₽)</label><input class="form-input" id="fPriceOzon" type="number" min="0" step="0.01" placeholder="0"></div></div>
     <div class="form-group"><label class="form-label">Дата последней отгрузки</label><input class="form-input" id="fShipment" type="date"></div>
     <div class="form-group"><label class="form-label">Комментарий</label><input class="form-input" id="fComment" placeholder="Любые заметки по товару"></div>
     <div class="form-group"><label class="form-label">Фото (URL)</label><input class="form-input" id="fPhoto" placeholder="https://..."></div>
@@ -371,10 +368,7 @@
       <input type="file" id="importInput" accept=".xlsx,.xls,.csv" onchange="handleImport(this)">
     </div>
     <div class="log-wrap" id="importLog"></div>
-    <div style="margin-top:16px;padding:12px 14px;background:var(--surface2);border-radius:var(--radius-sm);font-size:12px;color:var(--text3);line-height:1.7">
-      💡 Строка 1 — заголовки, далее данные.<br>
-      <span style="color:var(--yellow)">⚠ Товары с таким же названием будут пропущены.</span>
-    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border-radius:var(--radius-sm)"><input type="checkbox" id="importUpdateMode" style="accent-color:var(--accent);width:16px;height:16px"><label for="importUpdateMode" style="font-size:13px;color:var(--text2);cursor:pointer">Обновить существующие товары (себестоимость, цены, фото)</label></div>    <div style="margin-top:8px;padding:10px 14px;background:var(--surface2);border-radius:var(--radius-sm);font-size:12px;color:var(--text3);line-height:1.7">💡 Строка 1 — заголовки, далее данные. Сектор и Количество — необязательно.</div>
     <div class="modal-btns"><button class="btn btn-outline" onclick="closeModal('modalImport')">Закрыть</button></div>
   </div>
 </div>
@@ -401,7 +395,8 @@ async function sbInsertOne(row) {
     headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
     body: JSON.stringify({
       name: row.name, sector: row.sector, qty: row.qty || 0, photo: row.photo || null,
-      cost: row.cost || 0, price: row.price || 0,
+      cost: row.cost || 0, price_ozon: row.price_ozon || 0,
+      qty_ozon: row.qty_ozon || 0,
       last_shipment: row.last_shipment || null, comment: row.comment || null,
       article: row.article || null, barcode: row.barcode || null
     })
@@ -501,7 +496,11 @@ function renderTable() {
   const sector = document.getElementById('sectorFilter').value;
   const stock  = document.getElementById('stockFilter').value;
 
-  const filtered = _products.filter(p => {
+  const sorted = [..._products].sort((a,b) => {
+    const av = a[_sortField] ?? '', bv = b[_sortField] ?? '';
+    return typeof av === 'number' ? (av-bv)*_sortDir : String(av).localeCompare(String(bv),'ru')*_sortDir;
+  });
+  const filtered = sorted.filter(p => {
     if (search && !p.name.toLowerCase().includes(search)) return false;
     if (sector && p.sector !== sector) return false;
     if (stock === 'archived') { if (!p.archived) return false; } else { if (p.archived) return false; }
@@ -533,6 +532,8 @@ function renderTable() {
       const archivedBadge = p.archived ? '<span style="background:rgba(255,196,66,0.15);color:var(--yellow);border:1px solid rgba(255,196,66,0.3);border-radius:4px;font-size:10px;padding:1px 5px;margin-left:4px">архив</span>' : '';
       const article = p.article ? `<span style="font-family:monospace;font-size:12px;color:var(--accent)">${p.article}</span>` : '<span style="color:var(--text3)">—</span>';
       const barcode = p.barcode ? `<span style="font-family:monospace;font-size:12px;color:var(--text2)">${p.barcode}</span>` : '<span style="color:var(--text3)">—</span>';
+      const qtyOzon = p.qty_ozon > 0 ? `<span class="qty ok">${p.qty_ozon}</span>` : '<span style="color:var(--text3)">—</span>';
+      const priceOzon = p.price_ozon ? `${Number(p.price_ozon).toLocaleString('ru')} ₽` : '<span style="color:var(--text3)">—</span>';
       return `<tr>
         <td class="cb-wrap"><input type="checkbox" class="row-cb" data-id="${p.id}" onchange="updateBulkPanel()"></td>
         <td class="num-cell">${i+1}</td>
@@ -542,8 +543,9 @@ function renderTable() {
         <td>${barcode}</td>
         <td><span class="sector-badge">${p.sector}</span></td>
         <td><span class="qty ${cls}">${p.qty}</span></td>
+        <td>${qtyOzon}</td>
         <td>${cost}</td>
-        <td>${price}</td>
+        <td>${priceOzon}</td>
         <td>${sumCell}</td>
         <td style="font-size:13px">${shipDate}</td>
         <td style="font-size:13px;max-width:140px">${comment}</td>
@@ -580,7 +582,9 @@ function openAddModal(name='', qty=0) {
   document.getElementById('fBarcode').value = '';
   document.getElementById('fSector').value = '';
   document.getElementById('fQty').value = qty;
+  document.getElementById('fQtyOzon').value = '';
   document.getElementById('fCost').value = '';
+  document.getElementById('fPriceOzon').value = '';
   document.getElementById('fPrice').value = '';
   document.getElementById('fShipment').value = '';
   document.getElementById('fComment').value = '';
@@ -599,7 +603,9 @@ function openEditModal(id) {
   document.getElementById('fBarcode').value = p.barcode || '';
   document.getElementById('fSector').value = p.sector;
   document.getElementById('fQty').value = p.qty;
+  document.getElementById('fQtyOzon').value = p.qty_ozon || '';
   document.getElementById('fCost').value = p.cost || '';
+  document.getElementById('fPriceOzon').value = p.price_ozon || '';
   document.getElementById('fPrice').value = p.price || '';
   document.getElementById('fShipment').value = p.last_shipment || '';
   document.getElementById('fComment').value = p.comment || '';
@@ -613,9 +619,10 @@ async function saveProduct() {
   const article  = document.getElementById('fArticle').value.trim() || null;
   const barcode  = document.getElementById('fBarcode').value.trim() || null;
   const sector   = document.getElementById('fSector').value.trim();
-  const qty      = parseInt(document.getElementById('fQty').value) || 0;
-  const cost     = parseFloat(document.getElementById('fCost').value) || 0;
-  const price    = parseFloat(document.getElementById('fPrice').value) || 0;
+  const qty       = parseInt(document.getElementById('fQty').value) || 0;
+  const qty_ozon  = parseInt(document.getElementById('fQtyOzon').value) || 0;
+  const cost      = parseFloat(document.getElementById('fCost').value) || 0;
+  const price_ozon = parseFloat(document.getElementById('fPriceOzon').value) || 0;
   const shipment = document.getElementById('fShipment').value || null;
   const comment  = document.getElementById('fComment').value.trim() || null;
   const photo    = document.getElementById('fPhoto').value.trim() || null;
@@ -623,7 +630,7 @@ async function saveProduct() {
 
   if (!name || !sector) { toast('❌ Заполните наименование и сектор', true); return; }
 
-  const fields = { name, article, barcode, sector, qty, cost, price, last_shipment: shipment, comment, photo };
+  const fields = { name, article, barcode, sector, qty, qty_ozon, cost, price_ozon, last_shipment: shipment, comment, photo };
 
   loading(true);
   try {
@@ -934,29 +941,59 @@ async function importRows(rows) {
   try {
     if (rows.length < 2) { log('importLog','red','Файл пустой или только заголовок'); return; }
     const h = rows[0].map(c => String(c).toLowerCase());
-    const nC = h.findIndex(c => c.includes('наимен')||c.includes('товар')||c.includes('name'));
-    const sC = h.findIndex(c => c.includes('сектор')||c.includes('место')||c.includes('полка')||c.includes('зона'));
-    const qC = h.findIndex(c => c.includes('кол')||c.includes('штук')||c.includes('qty')||c.includes('остат'));
-    const pC = h.findIndex(c => c.includes('фото')||c.includes('photo')||c.includes('img'));
-    const aC = h.findIndex(c => c.includes('артикул')||c.includes('article')||c.includes('арт'));
-    const bC = h.findIndex(c => c.includes('штрихкод')||c.includes('barcode')||c.includes('ean')||c.includes('баркод'));
+    const nC  = h.findIndex(c => c.includes('наимен')||c.includes('товар')||c.includes('name'));
+    const sC  = h.findIndex(c => c.includes('сектор')||c.includes('место')||c.includes('полка')||c.includes('зона'));
+    const qC  = h.findIndex(c => c.includes('доступно')||c.includes('склад')||c.includes('кол')||c.includes('штук')||c.includes('qty'));
+    const qOC = h.findIndex(c => c.includes('fbo')||c.includes('озон')||c.includes('ozon')||c.includes('продаж'));
+    const pC  = h.findIndex(c => c.includes('фото')||c.includes('photo')||c.includes('img'));
+    const aC  = h.findIndex(c => c.includes('артикул')||c.includes('article')||c.includes('арт'));
+    const bC  = h.findIndex(c => c.includes('штрихкод')||c.includes('barcode')||c.includes('ean')||c.includes('баркод'));
+    const prC = h.findIndex(c => c.includes('цена')||c.includes('price')||c.includes('стоимост'));
+    const coC = h.findIndex(c => c.includes('себестоим')||c.includes('cost')||c.includes('закуп'));
     if (nC < 0) { log('importLog','red','Не найдена колонка «Наименование»'); return; }
-    if (sC < 0) { log('importLog','yellow','Колонка «Сектор» не найдена — будет подставлено «Не указан»'); }
-    const toInsert = [];
-    let skipped = 0;
+    if (sC < 0) { log('importLog','yellow','Колонка «Сектор» не найдена — будет «Не указан»'); }
+    const updateMode = document.getElementById('importUpdateMode')?.checked;
+    const toInsert = [], toUpdate = [];
+    let skipped = 0, updated = 0;
     for (let i = 1; i < rows.length; i++) {
-      const name    = String(rows[i][nC]||'').trim();
-      const sector  = sC >= 0 ? String(rows[i][sC]||'').trim()||'Не указан' : 'Не указан';
-      const qty     = qC >= 0 ? parseInt(rows[i][qC])||0 : 0;
-      const photo   = pC >= 0 ? String(rows[i][pC]||'').trim() : '';
-      const article = aC >= 0 ? String(rows[i][aC]||'').trim()||null : null;
-      const barcode = bC >= 0 ? String(rows[i][bC]||'').trim()||null : null;
+      const name     = String(rows[i][nC]||'').trim();
+      const sector   = sC  >= 0 ? String(rows[i][sC]||'').trim()||'Не указан' : 'Не указан';
+      const qty      = qC  >= 0 ? parseInt(rows[i][qC])||0  : 0;
+      const qty_ozon = qOC >= 0 ? parseInt(rows[i][qOC])||0 : 0;
+      const photo    = pC  >= 0 ? String(rows[i][pC]||'').trim()||null : null;
+      const article  = aC  >= 0 ? String(rows[i][aC]||'').trim()||null : null;
+      const barcode  = bC  >= 0 ? String(rows[i][bC]||'').trim()||null : null;
+      const price_ozon = prC >= 0 ? parseFloat(String(rows[i][prC]).replace(/[^0-9.]/g,''))||0 : 0;
+      const cost     = coC >= 0 ? parseFloat(String(rows[i][coC]).replace(/[^0-9.]/g,''))||0 : 0;
       if (!name) { skipped++; continue; }
-      if (_products.find(p => p.name.toLowerCase() === name.toLowerCase())) {
-        log('importLog','yellow',`Пропущен (уже есть): <span class="log-name">${name}</span>`);
-        skipped++; continue;
+      const existing = _products.find(p => p.name.toLowerCase() === name.toLowerCase()
+        || (article && p.article && p.article === article)
+        || (barcode && p.barcode && p.barcode === barcode));
+      if (existing) {
+        if (updateMode) {
+          const upd = {};
+          if (photo && !existing.photo) upd.photo = photo;
+          if (cost && !existing.cost)   upd.cost = cost;
+          if (price_ozon)               upd.price_ozon = price_ozon;
+          if (qty_ozon)                 upd.qty_ozon = qty_ozon;
+          if (article && !existing.article) upd.article = article;
+          if (barcode && !existing.barcode) upd.barcode = barcode;
+          if (Object.keys(upd).length) { toUpdate.push({id: existing.id, upd, name}); }
+          else { log('importLog','yellow',`Без изменений: <span class="log-name">${name}</span>`); skipped++; }
+        } else {
+          log('importLog','yellow',`Пропущен (уже есть): <span class="log-name">${name}</span>`);
+          skipped++;
+        }
+        continue;
       }
-      toInsert.push({name, sector, qty, photo: photo||null, article, barcode});
+      toInsert.push({name, sector, qty, qty_ozon, photo, article, barcode, price_ozon, cost});
+    }
+    for (const {id, upd, name} of toUpdate) {
+      await sbUpdate(id, upd);
+      const p = _products.find(x => x.id === id);
+      if (p) Object.assign(p, upd);
+      log('importLog','blue',`Обновлён: <span class="log-name">${name}</span>`);
+      updated++;
     }
     if (toInsert.length) {
       const data = await sbInsertMany(toInsert);
@@ -964,8 +1001,8 @@ async function importRows(rows) {
     }
     saveLocal(); renderTable();
     log('importLog','blue','— — —');
-    log('importLog','green',`✅ Добавлено: ${toInsert.length} | Пропущено: ${skipped}`);
-    toast(`✅ Импортировано ${toInsert.length} товаров`);
+    log('importLog','green',`✅ Добавлено: ${toInsert.length} | Обновлено: ${updated} | Пропущено: ${skipped}`);
+    toast(`✅ Добавлено: ${toInsert.length}, обновлено: ${updated}`);
   } catch(err) { log('importLog','red','Ошибка: ' + err.message); }
 }
 
@@ -981,6 +1018,17 @@ function downloadTemplate() {
   ws['!cols']=[{wch:35},{wch:15},{wch:18},{wch:12},{wch:12},{wch:15},{wch:15},{wch:40}];
   XLSX.utils.book_append_sheet(wb,ws,'Товары');
   XLSX.writeFile(wb,'шаблон_склад.xlsx');
+}
+
+
+// ============================================================
+// SORTING
+// ============================================================
+let _sortField = 'id', _sortDir = 1;
+function sortBy(field) {
+  if (_sortField === field) _sortDir *= -1;
+  else { _sortField = field; _sortDir = 1; }
+  renderTable();
 }
 
 // ============================================================
