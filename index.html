@@ -848,25 +848,26 @@ async function parseRowsWithAI(rows, mode, logId) {
 
   // Limit to first 200 rows to avoid token overflow, keep header
   const sample = rows.slice(0, 200);
-  const tableText = sample.map(r => r.map(c => String(c ?? '').trim()).join('	')).join('
-');
+  const tableText = sample.map(r => r.map(c => String(c == null ? '' : c).trim()).join(String.fromCharCode(9))).join(String.fromCharCode(10));
   const modeText = mode === 'shipment' ? 'товарной накладной на отгрузку' : 'акта приёмки товара';
 
   log(logId, 'blue', '✨ AI анализирует таблицу...');
 
-  const prompt = `Это таблица из ${modeText}. Извлеки товарные позиции.
-
-Правила:
-- Найди колонку с наименованием товара и колонку с количеством
-- Пропусти итоговые строки (Итого, Всего, НДС), заголовки, пустые строки
-- Если есть артикул или штрихкод — включи их
-- qty должно быть целым числом > 0
-
-Ответь ТОЛЬКО JSON без пояснений и markdown:
-{"items":[{"name":"название товара","qty":число,"article":"артикул или null","barcode":"штрихкод или null"}]}
-
-Таблица:
-${tableText}`;
+  const prompt = [
+    'Это таблица из ' + modeText + '. Извлеки товарные позиции.',
+    '',
+    'Правила:',
+    '- Найди колонку с наименованием товара и колонку с количеством',
+    '- Пропусти итоговые строки (Итого, Всего, НДС), заголовки, пустые строки',
+    '- Если есть артикул или штрихкод - включи их',
+    '- qty должно быть целым числом > 0',
+    '',
+    'Ответь ТОЛЬКО JSON без пояснений и markdown:',
+    '{"items":[{"name":"название товара","qty":123,"article":"артикул или null","barcode":"штрихкод или null"}]}',
+    '',
+    'Таблица:',
+    tableText
+  ].join('\n');
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
