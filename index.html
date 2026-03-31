@@ -303,11 +303,11 @@
         </div>
       </div>
       <div class="upload-card">
-        <div class="upload-card-title">📊 Excel накладная</div>
+        <div class="upload-card-title">📊 Excel / CSV накладная</div>
         <div class="upload-card-sub">Система найдёт столбцы с наименованиями и количеством.</div>
         <div class="drop-zone" onclick="document.getElementById('xlsShipInput').click()" ondragover="onDragOver(event,this)" ondragleave="onDragLeave(this)" ondrop="onDrop(event,this,'excel','shipment')">
-          <div class="drop-icon">📊</div>Перетащите Excel сюда<br>или нажмите для выбора
-          <input type="file" id="xlsShipInput" accept=".xlsx,.xls" onchange="handleFile(this,'excel','shipment')">
+          <div class="drop-icon">📊</div>Перетащите Excel или CSV сюда<br>или нажмите для выбора
+          <input type="file" id="xlsShipInput" accept=".xlsx,.xls,.csv" onchange="handleFile(this,'excel','shipment')">
         </div>
       </div>
     </div>
@@ -335,11 +335,11 @@
         </div>
       </div>
       <div class="upload-card">
-        <div class="upload-card-title">📊 Excel акт поступления</div>
+        <div class="upload-card-title">📊 Excel / CSV акт поступления</div>
         <div class="upload-card-sub">Система автоматически обновит остатки.</div>
         <div class="drop-zone" onclick="document.getElementById('xlsRecInput').click()" ondragover="onDragOver(event,this)" ondragleave="onDragLeave(this)" ondrop="onDrop(event,this,'excel','receiving')">
-          <div class="drop-icon">📊</div>Перетащите Excel сюда<br>или нажмите для выбора
-          <input type="file" id="xlsRecInput" accept=".xlsx,.xls" onchange="handleFile(this,'excel','receiving')">
+          <div class="drop-icon">📊</div>Перетащите Excel или CSV сюда<br>или нажмите для выбора
+          <input type="file" id="xlsRecInput" accept=".xlsx,.xls,.csv" onchange="handleFile(this,'excel','receiving')">
         </div>
       </div>
     </div>
@@ -804,8 +804,24 @@ async function processFile(file, type, mode) {
   const logEl = document.getElementById(logId);
   logEl.innerHTML = ''; logEl.classList.add('show');
   log(logId, 'blue', `Загрузка: <span class="log-name">${file.name}</span>`);
-  if (type === 'excel') processExcel(file, mode, logId);
-  else processPDF(file, mode, logId);
+  if (type === 'excel') {
+    if (file.name.toLowerCase().endsWith('.csv')) processCsvFile(file, mode, logId);
+    else processExcel(file, mode, logId);
+  } else {
+    processPDF(file, mode, logId);
+  }
+}
+
+async function processCsvFile(file, mode, logId) {
+  log(logId, 'blue', 'Читаю CSV...');
+  try {
+    const text = await file.text();
+    const rows = parseCsv(text);
+    log(logId, 'blue', `Строк в файле: ${rows.length}`);
+    const items = parseRows(rows);
+    log(logId, 'blue', `Распознано позиций: <span class="log-name">${items.length}</span>`);
+    applyItems(items, mode, logId);
+  } catch(err) { log(logId, 'red', 'Ошибка CSV: ' + err.message); }
 }
 
 // ============================================================
