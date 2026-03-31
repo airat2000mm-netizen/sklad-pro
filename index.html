@@ -424,7 +424,6 @@ async function doLogin() {
     const storage = remember ? localStorage : sessionStorage;
     storage.setItem('sp_token', data.access_token);
     if (data.refresh_token) storage.setItem('sp_refresh', data.refresh_token);
-    SB_HEADERS['Authorization'] = 'Bearer ' + data.access_token;
     showApp();
   } catch(e) {
     errEl.textContent = e.message;
@@ -440,7 +439,6 @@ function showApp() {
 function checkAuth() {
   const token = localStorage.getItem('sp_token') || sessionStorage.getItem('sp_token');
   if (token) {
-    SB_HEADERS['Authorization'] = 'Bearer ' + token;
     showApp();
   }
 }
@@ -448,7 +446,6 @@ function checkAuth() {
 function doLogout() {
   localStorage.removeItem('sp_token'); localStorage.removeItem('sp_refresh');
   sessionStorage.removeItem('sp_token'); sessionStorage.removeItem('sp_refresh');
-  SB_HEADERS['Authorization'] = 'Bearer ' + SB_KEY;
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('authScreen').style.display = 'flex';
   _products = []; renderTable();
@@ -460,6 +457,11 @@ function doLogout() {
 const SB_URL = 'https://wkuymkrvkeiecckdqgnu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrdXlta3J2a2VpZWNja2RxZ251Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4ODIyNzYsImV4cCI6MjA5MDQ1ODI3Nn0.C0qa10194n9QYih11DZ_xsjWFpT3u5Bcq3ig1Su-ktA';
 const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
+function getHeaders(extra) {
+  const token = localStorage.getItem('sp_token') || sessionStorage.getItem('sp_token');
+  return { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+    'Authorization': token ? 'Bearer ' + token : 'Bearer ' + SB_KEY, ...extra };
+}
 
 async function refreshToken() {
   const refresh = localStorage.getItem('sp_refresh') || sessionStorage.getItem('sp_refresh');
@@ -475,17 +477,16 @@ async function refreshToken() {
     const storage = localStorage.getItem('sp_token') ? localStorage : sessionStorage;
     storage.setItem('sp_token', data.access_token);
     if (data.refresh_token) storage.setItem('sp_refresh', data.refresh_token);
-    SB_HEADERS['Authorization'] = 'Bearer ' + data.access_token;
     return true;
   } catch(e) { return false; }
 }
 
 async function sbGet() {
-  let r = await fetch(`${SB_URL}/rest/v1/products?select=*&order=id`, { headers: SB_HEADERS });
+  let r = await fetch(`${SB_URL}/rest/v1/products?select=*&order=id`, { headers: getHeaders() });
   if (r.status === 401) {
     const refreshed = await refreshToken();
     if (refreshed) {
-      r = await fetch(`${SB_URL}/rest/v1/products?select=*&order=id`, { headers: SB_HEADERS });
+      r = await fetch(`${SB_URL}/rest/v1/products?select=*&order=id`, { headers: getHeaders() });
     } else {
       localStorage.removeItem('sp_token'); localStorage.removeItem('sp_refresh');
       sessionStorage.removeItem('sp_token'); sessionStorage.removeItem('sp_refresh');
@@ -502,7 +503,7 @@ async function sbGet() {
 async function sbInsertOne(row) {
   const r = await fetch(`${SB_URL}/rest/v1/products`, {
     method: 'POST',
-    headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
+    headers: getHeaders({'Prefer': 'return=representation'}),
     body: JSON.stringify({
       name: row.name, sector: row.sector, qty: row.qty || 0, photo: row.photo || null,
       cost: row.cost || 0, price_ozon: row.price_ozon || 0,
@@ -519,7 +520,7 @@ async function sbInsertOne(row) {
 async function sbInsertMany(rows) {
   const r = await fetch(`${SB_URL}/rest/v1/products`, {
     method: 'POST',
-    headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
+    headers: getHeaders({'Prefer': 'return=representation'}),
     body: JSON.stringify(rows.map(row => ({ name: row.name, sector: row.sector, qty: row.qty || 0, photo: row.photo || null })))
   });
   if (!r.ok) throw new Error(await r.text());
@@ -529,7 +530,7 @@ async function sbInsertMany(rows) {
 async function sbUpdate(id, fields) {
   const r = await fetch(`${SB_URL}/rest/v1/products?id=eq.${id}`, {
     method: 'PATCH',
-    headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' },
+    headers: getHeaders({'Prefer': 'return=minimal'}),
     body: JSON.stringify(fields)
   });
   if (!r.ok) throw new Error(await r.text());
@@ -538,7 +539,7 @@ async function sbUpdate(id, fields) {
 async function sbDelete(id) {
   const r = await fetch(`${SB_URL}/rest/v1/products?id=eq.${id}`, {
     method: 'DELETE',
-    headers: SB_HEADERS
+    headers: getHeaders()
   });
   if (!r.ok) throw new Error(await r.text());
 }
@@ -1048,7 +1049,8 @@ function parseCsv(text) {
 async function importRows(rows) {
   try {
     if (rows.length < 2) { log('importLog','red','Файл пустой или только заголовок'); return; }
-    const h = rows[0].map(c => String(c).toLowerCase());
+    const h = rows[0].map(c => String(c).toLowerCase().trim());
+    log('importLog','blue',`Заголовки: ${h.slice(0,8).join(' | ')}`);
     // --- Универсальное распознавание колонок (Ozon остатки + Ozon шаблон + свои файлы) ---
     const nC  = h.findIndex(c => c.includes('название товара')||c.includes('наимен')||c.includes('name'));
     const sC  = h.findIndex(c => c.includes('сектор')||c.includes('место')||c.includes('полка')||c.includes('зона'));
