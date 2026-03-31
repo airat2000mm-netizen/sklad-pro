@@ -870,26 +870,55 @@ async function parseRowsWithAI(rows, mode, logId) {
   ].join('\n');
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error?.message || JSON.stringify(data));
-    const text = (data.content || []).find(b => b.type === 'text')?.text || '';
-    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-    log(logId, 'green', `AI распознал <span class="log-name">${parsed.items.length} позиций</span>`);
-    applyItems(parsed.items, mode, logId);
+    // Split into batches of 80 rows to avoid token limits
+    const BATCH = 80;
+    const allItems = [];
+    const batches = [];
+    for (let i = 0; i < rows.length; i += BATCH) batches.push(rows.slice(i, i + BATCH));
+    log(logId, 'blue', 'Батчей для обработки: ' + batches.length);
+
+    for (let b = 0; b < batches.length; b++) {
+      const batchText = batches[b].map(r => r.map(c => String(c == null ? '' : c).trim()).join(String.fromCharCode(9))).join(String.fromCharCode(10));
+      const batchPrompt = prompt.replace(tableText, batchText);
+
+      log(logId, 'blue', 'Батч ' + (b+1) + '/' + batches.length + '...');
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 8000,
+          messages: [{ role: 'user', content: batchPrompt }]
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || JSON.stringify(data));
+      const text = (data.content || []).find(b => b.type === 'text')?.text || '';
+
+      // Robust JSON extraction — find first { ... } block
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) { log(logId, 'yellow', 'Батч ' + (b+1) + ': нет данных'); continue; }
+      let parsed;
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch(parseErr) {
+        // Try to recover truncated JSON by extracting complete item objects
+        const itemMatches = text.matchAll(/\{"name"\s*:\s*"([^"]+)"\s*,\s*"qty"\s*:\s*(\d+)[^}]*\}/g);
+        parsed = { items: [] };
+        for (const m of itemMatches) parsed.items.push({ name: m[1], qty: parseInt(m[2]) });
+        if (parsed.items.length === 0) { log(logId, 'yellow', 'Батч ' + (b+1) + ': не удалось распарсить'); continue; }
+      }
+      allItems.push(...(parsed.items || []));
+      log(logId, 'blue', 'Батч ' + (b+1) + ': ' + (parsed.items||[]).length + ' позиций');
+    }
+
+    log(logId, 'green', 'AI распознал итого: <span class="log-name">' + allItems.length + ' позиций</span>');
+    applyItems(allItems, mode, logId);
   } catch(err) { log(logId, 'red', 'Ошибка AI: ' + err.message); }
 }
 
