@@ -132,6 +132,8 @@
   /* UNKNOWN */
   .unknown-list { display:flex;flex-direction:column;gap:10px;margin-top:16px; }
   .unknown-item { background:var(--surface2);border:1px solid rgba(255,92,92,0.3);border-radius:var(--radius-sm);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px; }
+  .unknown-toolbar { display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap; }
+  .unknown-toolbar label { font-size:13px;color:var(--text2);cursor:pointer;display:flex;align-items:center;gap:6px; }
   .unknown-name { font-weight:500;font-size:14px; }
   .unknown-qty { font-size:13px;color:var(--text3);margin-top:2px; }
 
@@ -364,6 +366,10 @@
     <div class="section-top">
       <div><div class="section-title">Неизвестные товары</div><div class="section-sub">Позиции из накладных которых нет в базе — создайте карточки</div></div>
     </div>
+    <div class="unknown-toolbar" id="unknownToolbar" style="display:none">
+      <label><input type="checkbox" id="unknownCheckAll" onchange="toggleAllUnknown(this)" style="accent-color:var(--accent);width:15px;height:15px"> Выбрать все</label>
+      <button class="btn btn-red btn-sm" onclick="deleteSelectedUnknown()">🗑 Удалить выбранные</button>
+    </div>
     <div class="unknown-list" id="unknownList"></div>
   </div>
 
@@ -448,6 +454,19 @@
 
 </div><!-- /appShell -->
 <div id="toast"></div>
+
+<!-- MODAL: ПОДТВЕРЖДЕНИЕ ОПЕРАЦИИ -->
+<div class="modal-overlay" id="modalConfirm">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title" id="confirmTitle">Подтверждение</div>
+    <div class="modal-sub" id="confirmSub"></div>
+    <div id="confirmList" style="max-height:260px;overflow-y:auto;margin:16px 0;display:flex;flex-direction:column;gap:6px"></div>
+    <div class="modal-btns">
+      <button class="btn btn-outline" onclick="closeModal('modalConfirm');_confirmReject&&_confirmReject()">Отмена</button>
+      <button class="btn btn-primary" id="confirmOkBtn" onclick="_confirmResolve&&_confirmResolve();closeModal('modalConfirm')">Подтвердить</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ============================================================
@@ -1141,6 +1160,32 @@ async function processPDF(file, mode, logId) {
 }
 
 // ============================================================
+// CONFIRM MODAL HELPERS
+// ============================================================
+let _confirmResolve = null, _confirmReject = null;
+let mode_tmp = '';
+
+function showConfirm(title, sub, items, okLabel) {
+  return new Promise(function(resolve, reject) {
+    _confirmResolve = resolve;
+    _confirmReject  = reject;
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmSub').textContent   = sub;
+    document.getElementById('confirmOkBtn').textContent = okLabel || 'Подтвердить';
+    const listEl = document.getElementById('confirmList');
+    listEl.innerHTML = items.slice(0, 30).map(function(it) {
+      const delta = mode_tmp === 'shipment' ? '-' : '+';
+      const color = mode_tmp === 'shipment' ? 'var(--red)' : 'var(--green)';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surface2);border-radius:6px;font-size:13px">' +
+        '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(it.name) + '</span>' +
+        '<span style="font-family:Unbounded,sans-serif;font-size:12px;font-weight:700;color:' + color + ';margin-left:12px;flex-shrink:0">' + delta + (it.qty||0) + ' шт</span>' +
+      '</div>';
+    }).join('') + (items.length > 30 ? '<div style="text-align:center;color:var(--text3);font-size:12px;padding:8px">...и ещё ' + (items.length-30) + ' позиций</div>' : '');
+    document.getElementById('modalConfirm').classList.add('open');
+  });
+}
+
+// ============================================================
 // APPLY ITEMS (списание / пополнение)
 // ============================================================
 // ============================================================
@@ -1163,6 +1208,23 @@ function setRecTarget(t) {
 async function applyItems(items, mode, logId) {
   const target = mode === 'shipment' ? _shipTarget : _recTarget;
   const field = target === 'ozon' ? 'qty_ozon' : 'qty';
+  // Show confirmation before applying
+  mode_tmp = mode;
+  const fieldLabel = field === 'qty_ozon' ? 'Ozon FBO' : 'Склад';
+  const opLabel    = mode === 'shipment' ? 'Списание со склада' : 'Приёмка на склад';
+  const okLabel    = mode === 'shipment' ? '✅ Списать' : '✅ Принять';
+  try {
+    await showConfirm(
+      opLabel,
+      'Будет обновлено ' + items.length + ' позиций · ' + fieldLabel,
+      items,
+      okLabel
+    );
+  } catch(e) {
+    log(logId, 'yellow', 'Операция отменена');
+    return;
+  }
+
   let matched=0, notFound=[];
   for (const item of items) {
     const p = findProduct(item.name) || (item.article ? _products.find(x=>x.article===item.article) : null) || (item.barcode ? _products.find(x=>x.barcode===String(item.barcode)) : null);
@@ -1209,22 +1271,53 @@ function findProduct(name) {
 // UNKNOWN ITEMS
 // ============================================================
 function renderUnknown() {
-  const list  = document.getElementById('unknownList');
-  const badge = document.getElementById('unknownBadge');
+  const list    = document.getElementById('unknownList');
+  const badge   = document.getElementById('unknownBadge');
+  const toolbar = document.getElementById('unknownToolbar');
   if (!_unknown.length) {
     badge.style.display='none';
-    list.innerHTML=`<div class="empty"><div class="empty-icon">✅</div><div class="empty-title">Всё в порядке</div><div class="empty-sub">Неизвестных товаров нет</div></div>`;
+    if (toolbar) toolbar.style.display='none';
+    list.innerHTML='<div class="empty"><div class="empty-icon">✅</div><div class="empty-title">Всё в порядке</div><div class="empty-sub">Неизвестных товаров нет</div></div>';
     return;
   }
   badge.textContent=_unknown.length; badge.style.display='inline';
-  list.innerHTML = _unknown.map((u,i)=>`
-    <div class="unknown-item">
-      <div><div class="unknown-name">${u.name}</div><div class="unknown-qty">${u.qty} шт в документе</div></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-green btn-sm" onclick="openCardModal(${i})">+ Создать карточку</button>
-        <button class="btn btn-outline btn-sm" onclick="skipUnknown(${i})">Пропустить</button>
-      </div>
-    </div>`).join('');
+  if (toolbar) toolbar.style.display='flex';
+  list.innerHTML = _unknown.map((u,i) =>
+    '<div class="unknown-item">' +
+      '<input type="checkbox" class="unknown-cb" data-idx="' + i + '" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;cursor:pointer" onchange="syncUnknownCheckAll()">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div class="unknown-name">' + escHtml(u.name) + '</div>' +
+        '<div class="unknown-qty">' + (u.qty||0) + ' шт в документе</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;flex-shrink:0">' +
+        '<button class="btn btn-green btn-sm" onclick="openCardModal(' + i + ')">+ Карточка</button>' +
+        '<button class="btn btn-outline btn-sm" onclick="skipUnknown(' + i + ')">Пропустить</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+}
+
+function toggleAllUnknown(cb) {
+  document.querySelectorAll('.unknown-cb').forEach(c => c.checked = cb.checked);
+}
+
+function syncUnknownCheckAll() {
+  const cbs = [...document.querySelectorAll('.unknown-cb')];
+  const all = document.getElementById('unknownCheckAll');
+  if (!all) return;
+  const checked = cbs.filter(c => c.checked).length;
+  all.checked = checked === cbs.length;
+  all.indeterminate = checked > 0 && checked < cbs.length;
+}
+
+function deleteSelectedUnknown() {
+  const selected = [...document.querySelectorAll('.unknown-cb:checked')].map(c => parseInt(c.dataset.idx));
+  if (!selected.length) { toast('Ничего не выбрано', true); return; }
+  if (!confirm('Удалить ' + selected.length + ' неизвестных товаров из списка?')) return;
+  // Remove in reverse order to keep indices valid
+  selected.sort((a,b) => b-a).forEach(i => _unknown.splice(i, 1));
+  saveLocal(); renderUnknown();
+  toast('🗑 Удалено: ' + selected.length);
 }
 
 function openCardModal(i) {
@@ -1282,27 +1375,127 @@ async function processImportFile(file) {
   const logEl = document.getElementById('importLog');
   logEl.innerHTML=''; logEl.classList.add('show');
   log('importLog','blue',`Читаю: <span class="log-name">${file.name}</span>`);
-  
+
+  let rows = [];
   const isCsv = file.name.toLowerCase().endsWith('.csv');
-  
+
   if (isCsv) {
     const text = await file.text();
-    const rows = parseCsv(text);
+    rows = parseCsv(text);
     log('importLog','blue',`CSV строк: ${rows.length}`);
-    await importRows(rows);
-    return;
+  } else {
+    await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(e.target.result,{type:'array'});
+          rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+          log('importLog','blue',`Excel строк: ${rows.length}`);
+          resolve();
+        } catch(err){ reject(err); }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
   }
-  
-  const reader = new FileReader();
-  reader.onload = async e => {
+
+  // Use AI if key is available, otherwise fall back to rule-based
+  const key = localStorage.getItem('sp_apikey');
+  if (key) {
+    log('importLog','blue','✨ AI анализирует таблицу для импорта...');
+    await parseRowsWithAI_import(rows);
+  } else {
+    await importRows(rows);
+  }
+}
+
+async function parseRowsWithAI_import(rows) {
+  const key = localStorage.getItem('sp_apikey');
+  const BATCH = 60;
+  const allItems = [];
+  const SEP = String.fromCharCode(9);
+  const NL  = String.fromCharCode(10);
+
+  const headerRow = rows[0] || [];
+  const dataRows  = rows.slice(1);
+  const batches   = [];
+  for (let i = 0; i < dataRows.length; i += BATCH) {
+    batches.push([headerRow, ...dataRows.slice(i, i + BATCH)]);
+  }
+  if (batches.length === 0) batches.push(rows);
+
+  log('importLog','blue','Строк: ' + dataRows.length + ', батчей: ' + batches.length);
+
+  for (let b = 0; b < batches.length; b++) {
+    const batchText = batches[b]
+      .map(r => r.map(c => String(c == null ? '' : c).trim()).join(SEP))
+      .join(NL);
+
+    const lines = [
+      'Это таблица товаров для импорта на склад. Извлеки все товарные позиции.',
+      '',
+      'Правила:',
+      '- Найди колонки: наименование, количество (склад), сектор, артикул, штрихкод, себестоимость, цена Ozon',
+      '- Пропусти итоговые строки (Итого, Всего, НДС), заголовки, пустые строки',
+      '- qty — количество на складе (целое >= 0)',
+      '- Верни ТОЛЬКО валидный JSON без markdown',
+      '',
+      'Формат: {"items":[{"name":"Название","qty":5,"sector":"A1","article":"123","barcode":null,"cost":100,"price_ozon":200}]}',
+      '',
+      'Таблица (колонки разделены табуляцией):',
+      batchText
+    ];
+    const prompt = lines.join(NL);
+
+    log('importLog','blue','Батч ' + (b+1) + ' из ' + batches.length + '...');
     try {
-      const wb = XLSX.read(e.target.result,{type:'array'});
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
-      log('importLog','blue',`Excel строк: ${rows.length}`);
-      await importRows(rows);
-    } catch(err){log('importLog','red','Ошибка: '+err.message);}
-  };
-  reader.readAsArrayBuffer(file);
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 8000,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error?.message || JSON.stringify(data));
+
+      const raw = ((data.content || []).find(x => x.type === 'text') || {}).text || '';
+      const s = raw.indexOf('{');
+      const e = raw.lastIndexOf('}');
+      if (s === -1 || e === -1) { log('importLog','yellow','Батч ' + (b+1) + ': нет JSON'); continue; }
+
+      let parsed;
+      try { parsed = JSON.parse(raw.slice(s, e + 1)); }
+      catch(pe) {
+        parsed = { items: [] };
+        const re = new RegExp('"name"\s*:\s*"([^"]+)"\s*,\s*"qty"\s*:\s*(\d+)', 'g');
+        let m;
+        while ((m = re.exec(raw)) !== null) parsed.items.push({ name: m[1], qty: parseInt(m[2]) });
+      }
+
+      const items = (parsed.items || []).filter(function(x){ return x.name; });
+      allItems.push.apply(allItems, items);
+      log('importLog','green','Батч ' + (b+1) + ': ' + items.length + ' поз.');
+    } catch(err) {
+      log('importLog','red','Батч ' + (b+1) + ' ошибка: ' + err.message);
+    }
+  }
+
+  log('importLog','green','AI распознал итого: <span class="log-name">' + allItems.length + ' позиций</span>');
+  // Convert AI items to the format importRows expects (2D array with header)
+  const header = ['Наименование','Артикул Ozon','Штрихкод Ozon','Сектор','Количество','Себестоимость','Цена продажи','Фото (URL)'];
+  const dataArr = allItems.map(function(x){ return [
+    x.name||'', x.article||'', x.barcode||'', x.sector||'',
+    x.qty||0, x.cost||0, x.price_ozon||0, x.photo||''
+  ]; });
+  await importRows([header, ...dataArr]);
 }
 
 function parseCsv(text) {
