@@ -163,6 +163,14 @@
   #bulkSectorInput:focus { border-color:var(--accent); }
 
 
+
+  /* TARGET SELECTOR */
+  .target-selector { display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap; }
+  .target-label { font-size:13px;color:var(--text2);font-weight:600; }
+  .target-btn { padding:8px 18px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;border:2px solid var(--border);background:transparent;color:var(--text2);transition:all 0.18s;font-family:'Golos Text',sans-serif; }
+  .target-btn.active-warehouse { border-color:var(--accent);background:rgba(79,143,255,0.15);color:var(--accent); }
+  .target-btn.active-ozon { border-color:var(--green);background:rgba(45,219,127,0.15);color:var(--green); }
+  .target-btn:hover:not(.active-warehouse):not(.active-ozon) { border-color:var(--text2);color:var(--text); }
   /* AUTH */
   #authScreen { display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg); }
   .auth-box { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:40px;width:100%;max-width:380px;text-align:center; }
@@ -280,6 +288,11 @@
       <div><div class="section-title">Обработка товарной накладной</div><div class="section-sub">Загрузите накладную — AI прочитает и спишет товары со склада</div></div>
       <span class="ai-badge">✨ AI-разбор</span>
     </div>
+    <div class="target-selector">
+      <span class="target-label">Куда списываем:</span>
+      <button class="target-btn active-warehouse" id="shipTargetWarehouse" onclick="setShipTarget('warehouse')">📦 Склад</button>
+      <button class="target-btn" id="shipTargetOzon" onclick="setShipTarget('ozon')">🟠 Ozon FBO</button>
+    </div>
     <div class="upload-section">
       <div class="upload-card">
         <div class="upload-card-title">📄 PDF накладная</div>
@@ -306,6 +319,11 @@
     <div class="section-top">
       <div><div class="section-title">Приёмка нового товара</div><div class="section-sub">Загрузите акт поступления — система пополнит остатки</div></div>
       <span class="ai-badge">✨ AI-разбор</span>
+    </div>
+    <div class="target-selector">
+      <span class="target-label">Куда добавляем:</span>
+      <button class="target-btn active-warehouse" id="recTargetWarehouse" onclick="setRecTarget('warehouse')">📦 Склад</button>
+      <button class="target-btn" id="recTargetOzon" onclick="setRecTarget('ozon')">🟠 Ozon FBO</button>
     </div>
     <div class="upload-section">
       <div class="upload-card">
@@ -888,27 +906,45 @@ async function processPDF(file, mode, logId) {
 // ============================================================
 // APPLY ITEMS (списание / пополнение)
 // ============================================================
+// ============================================================
+// TARGET FIELD SELECTORS
+// ============================================================
+let _shipTarget = 'warehouse'; // 'warehouse' | 'ozon'
+let _recTarget = 'warehouse';
+
+function setShipTarget(t) {
+  _shipTarget = t;
+  document.getElementById('shipTargetWarehouse').className = 'target-btn' + (t==='warehouse' ? ' active-warehouse' : '');
+  document.getElementById('shipTargetOzon').className = 'target-btn' + (t==='ozon' ? ' active-ozon' : '');
+}
+function setRecTarget(t) {
+  _recTarget = t;
+  document.getElementById('recTargetWarehouse').className = 'target-btn' + (t==='warehouse' ? ' active-warehouse' : '');
+  document.getElementById('recTargetOzon').className = 'target-btn' + (t==='ozon' ? ' active-ozon' : '');
+}
+
 async function applyItems(items, mode, logId) {
+  const target = mode === 'shipment' ? _shipTarget : _recTarget;
+  const field = target === 'ozon' ? 'qty_ozon' : 'qty';
   let matched=0, notFound=[];
   for (const item of items) {
     const p = findProduct(item.name) || (item.article ? _products.find(x=>x.article===item.article) : null) || (item.barcode ? _products.find(x=>x.barcode===String(item.barcode)) : null);
     if (p) {
       const upd = {};
-      const before = p.qty;
+      const before = p[field];
       if (mode === 'shipment') {
-        upd.qty = Math.max(0, p.qty - (item.qty||0));
+        upd[field] = Math.max(0, (p[field]||0) - (item.qty||0));
       } else {
-        upd.qty = p.qty + (item.qty||0);
+        upd[field] = (p[field]||0) + (item.qty||0);
       }
-      if (item.qty_ozon != null) upd.qty_ozon = item.qty_ozon;
       if (item.price_ozon != null) upd.price_ozon = item.price_ozon;
       if (item.article && !p.article) upd.article = item.article;
       if (item.barcode && !p.barcode) upd.barcode = String(item.barcode);
       Object.assign(p, upd);
       try {
         await sbUpdate(p.id, upd);
-        const extra = item.qty_ozon != null ? `, Ozon FBO: ${item.qty_ozon}` : '';
-        log(logId,'green',`${mode==='shipment'?'Списано':'Добавлено'}: <span class="log-name">${p.name}</span> — склад: ${before}→${p.qty}${extra}`);
+        const extra = target === 'ozon' ? ` (Ozon FBO)` : '';
+        log(logId,'green',`${mode==='shipment'?'Списано':'Добавлено'}: <span class="log-name">${p.name}</span>${extra} — ${before}→${p[field]}`);
         matched++;
       } catch(e) { log(logId,'red',`Ошибка ${p.name}: ${e.message}`); }
     } else {
