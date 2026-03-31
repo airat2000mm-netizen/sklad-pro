@@ -171,6 +171,18 @@
   .target-btn.active-warehouse { border-color:var(--accent);background:rgba(79,143,255,0.15);color:var(--accent); }
   .target-btn.active-ozon { border-color:var(--green);background:rgba(45,219,127,0.15);color:var(--green); }
   .target-btn:hover:not(.active-warehouse):not(.active-ozon) { border-color:var(--text2);color:var(--text); }
+  /* HISTORY */
+  .hist-item { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;display:flex;align-items:center;gap:14px;transition:background 0.15s; }
+  .hist-item:hover { background:var(--surface2); }
+  .hist-icon { font-size:22px;flex-shrink:0; }
+  .hist-body { flex:1;min-width:0; }
+  .hist-title { font-size:14px;font-weight:600;color:var(--text);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  .hist-meta { font-size:12px;color:var(--text3); }
+  .hist-delta { font-family:'Unbounded',sans-serif;font-size:13px;font-weight:700;flex-shrink:0;min-width:60px;text-align:right; }
+  .hist-delta.plus { color:var(--green); }
+  .hist-delta.minus { color:var(--red); }
+  .hist-delta.neutral { color:var(--text3); }
+
   /* AUTH */
   #authScreen { display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg); }
   .auth-box { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:40px;width:100%;max-width:380px;text-align:center; }
@@ -225,6 +237,7 @@
   <button class="tab" id="tab-shipment" onclick="switchTab('shipment')">🚚 Отгрузка</button>
   <button class="tab" id="tab-receiving" onclick="switchTab('receiving')">📥 Приёмка</button>
   <button class="tab" id="tab-unknown" onclick="switchTab('unknown')">❓ Неизвестные <span class="tab-badge" id="unknownBadge" style="display:none">0</span></button>
+  <button class="tab" id="tab-history" onclick="switchTab('history')">🕓 История</button>
 </div>
 
 <div class="main">
@@ -354,6 +367,23 @@
     <div class="unknown-list" id="unknownList"></div>
   </div>
 
+  <!-- ИСТОРИЯ -->
+  <div class="page" id="page-history">
+    <div class="section-top">
+      <div>
+        <div class="section-title">История операций</div>
+        <div class="section-sub">Все изменения остатков — можно отменить последнее действие</div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="clearHistory()">🗑 Очистить историю</button>
+    </div>
+    <div id="historyList" style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
+    <div id="historyEmpty" class="empty" style="display:none">
+      <div class="empty-icon">🕓</div>
+      <div class="empty-title">История пуста</div>
+      <div class="empty-sub">Операции со складом будут отображаться здесь</div>
+    </div>
+  </div>
+
 </div>
 
 <!-- MODAL: ДОБАВИТЬ/РЕДАКТИРОВАТЬ -->
@@ -457,6 +487,7 @@ async function showApp() {
   loading(false);
   renderTable();
   renderUnknown();
+  renderHistory();
 }
 
 function checkAuth() {
@@ -600,6 +631,100 @@ async function fetchProducts() {
   } catch (e) {
     toast('⚠️ Не удалось загрузить данные: ' + e.message, true);
   }
+}
+
+// ============================================================
+// HISTORY
+// ============================================================
+let _history = JSON.parse(localStorage.getItem('sp_history') || '[]');
+
+function addHistory(action, productName, field, before, after, productId, snapshot) {
+  const entry = {
+    id: Date.now() + Math.random(),
+    ts: new Date().toISOString(),
+    action,        // 'shipment' | 'receiving' | 'edit' | 'add' | 'delete' | 'import'
+    productName,
+    field,         // 'qty' | 'qty_ozon'
+    before,
+    after,
+    productId,
+    snapshot       // full product state before change (for undo)
+  };
+  _history.unshift(entry);
+  if (_history.length > 500) _history = _history.slice(0, 500);
+  localStorage.setItem('sp_history', JSON.stringify(_history));
+}
+
+function renderHistory() {
+  const list = document.getElementById('historyList');
+  const empty = document.getElementById('historyEmpty');
+  if (!list) return;
+  if (!_history.length) { list.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  list.innerHTML = _history.map(function(h, i) {
+    const icons = { shipment:'🚚', receiving:'📥', edit:'✏️', add:'➕', delete:'🗑', import:'📊' };
+    const labels = { shipment:'Отгрузка', receiving:'Приёмка', edit:'Редактирование', add:'Добавление', delete:'Удаление', import:'Импорт' };
+    const icon = icons[h.action] || '📋';
+    const label = labels[h.action] || h.action;
+    const fieldLabel = h.field === 'qty_ozon' ? 'Ozon FBO' : 'Склад';
+    const dt = new Date(h.ts);
+    const dateStr = dt.toLocaleDateString('ru') + ' ' + dt.toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit'});
+
+    let delta = '', deltaClass = 'neutral';
+    if (h.before != null && h.after != null) {
+      const diff = (h.after - h.before);
+      delta = (diff >= 0 ? '+' : '') + diff + ' шт';
+      deltaClass = diff > 0 ? 'plus' : diff < 0 ? 'minus' : 'neutral';
+    }
+
+    const canUndo = (h.action === 'shipment' || h.action === 'receiving') && h.productId && i === 0;
+
+    return '<div class="hist-item">' +
+      '<div class="hist-icon">' + icon + '</div>' +
+      '<div class="hist-body">' +
+        '<div class="hist-title">' + escHtml(h.productName || '—') + '</div>' +
+        '<div class="hist-meta">' + label + ' · ' + fieldLabel + ' · ' + dateStr + '</div>' +
+        (h.before != null ? '<div class="hist-meta" style="margin-top:2px">' + h.before + ' → ' + h.after + ' шт</div>' : '') +
+      '</div>' +
+      (delta ? '<div class="hist-delta ' + deltaClass + '">' + delta + '</div>' : '') +
+      (canUndo ? '<button class="btn btn-outline btn-sm" onclick="undoLast()">↩ Отменить</button>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function undoLast() {
+  if (!_history.length) return;
+  const h = _history[0];
+  if (!h.productId || !h.snapshot) { toast('❌ Нет данных для отмены', true); return; }
+  const p = _products.find(function(x){ return x.id === h.productId; });
+  if (!p) { toast('❌ Товар не найден', true); return; }
+
+  loading(true);
+  try {
+    const upd = {};
+    upd[h.field] = h.before;
+    await sbUpdate(h.productId, upd);
+    p[h.field] = h.before;
+    _history.shift();
+    localStorage.setItem('sp_history', JSON.stringify(_history));
+    saveLocal(); renderTable(); renderHistory();
+    toast('↩ Отменено: ' + h.productName);
+  } catch(e) {
+    toast('❌ Ошибка отмены: ' + e.message, true);
+  } finally { loading(false); }
+}
+
+function clearHistory() {
+  if (!confirm('Очистить всю историю операций?')) return;
+  _history = [];
+  localStorage.setItem('sp_history', JSON.stringify(_history));
+  renderHistory();
+  toast('🗑 История очищена');
 }
 
 function saveLocal() {
@@ -770,7 +895,8 @@ async function saveProduct() {
       _products.push(newP);
       toast('✅ Товар добавлен на склад');
     }
-    saveLocal(); renderTable(); closeModal('modalAdd');
+    addHistory(editId ? 'edit' : 'add', name, 'qty', editId ? undefined : 0, qty, editId || (newP && newP.id), null);
+    saveLocal(); renderTable(); renderHistory(); closeModal('modalAdd');
   } catch (e) {
     toast('❌ Ошибка: ' + e.message, true);
   } finally { loading(false); }
@@ -780,6 +906,8 @@ async function removeProduct(id) {
   if (!confirm('Удалить товар из склада?')) return;
   loading(true);
   try {
+    const _dp = _products.find(function(p){ return p.id === id; });
+    if (_dp) addHistory('delete', _dp.name, 'qty', _dp.qty, 0, id, Object.assign({}, _dp));
     await sbDelete(id);
     _products = _products.filter(p => p.id !== id);
     saveLocal(); renderTable();
@@ -846,42 +974,48 @@ async function parseRowsWithAI(rows, mode, logId) {
   const key = localStorage.getItem('sp_apikey');
   if (!key) { log(logId, 'red', 'API ключ не задан. Обновите страницу.'); return; }
 
-  // Limit to first 200 rows to avoid token overflow, keep header
-  const sample = rows.slice(0, 200);
-  const tableText = sample.map(r => r.map(c => String(c == null ? '' : c).trim()).join(String.fromCharCode(9))).join(String.fromCharCode(10));
   const modeText = mode === 'shipment' ? 'товарной накладной на отгрузку' : 'акта приёмки товара';
+  const BATCH = 60;
+  const allItems = [];
+  const SEP = String.fromCharCode(9);
+  const NL  = String.fromCharCode(10);
 
-  log(logId, 'blue', '✨ AI анализирует таблицу...');
+  // Keep header row in each batch for column context
+  const headerRow = rows[0] || [];
+  const dataRows  = rows.slice(1);
+  const batches   = [];
+  for (let i = 0; i < dataRows.length; i += BATCH) {
+    batches.push([headerRow, ...dataRows.slice(i, i + BATCH)]);
+  }
+  if (batches.length === 0) batches.push(rows);
 
-  const prompt = [
-    'Это таблица из ' + modeText + '. Извлеки товарные позиции.',
-    '',
-    'Правила:',
-    '- Найди колонку с наименованием товара и колонку с количеством',
-    '- Пропусти итоговые строки (Итого, Всего, НДС), заголовки, пустые строки',
-    '- Если есть артикул или штрихкод - включи их',
-    '- qty должно быть целым числом > 0',
-    '',
-    'Ответь ТОЛЬКО JSON без пояснений и markdown:',
-    '{"items":[{"name":"название товара","qty":123,"article":"артикул или null","barcode":"штрихкод или null"}]}',
-    '',
-    'Таблица:',
-    tableText
-  ].join('\n');
+  log(logId, 'blue', 'Строк: ' + dataRows.length + ', батчей: ' + batches.length);
 
-  try {
-    // Split into batches of 80 rows to avoid token limits
-    const BATCH = 80;
-    const allItems = [];
-    const batches = [];
-    for (let i = 0; i < rows.length; i += BATCH) batches.push(rows.slice(i, i + BATCH));
-    log(logId, 'blue', 'Батчей для обработки: ' + batches.length);
+  for (let b = 0; b < batches.length; b++) {
+    const batchText = batches[b]
+      .map(r => r.map(c => String(c == null ? '' : c).trim()).join(SEP))
+      .join(NL);
 
-    for (let b = 0; b < batches.length; b++) {
-      const batchText = batches[b].map(r => r.map(c => String(c == null ? '' : c).trim()).join(String.fromCharCode(9))).join(String.fromCharCode(10));
-      const batchPrompt = prompt.replace(tableText, batchText);
+    const lines = [
+      'Это фрагмент таблицы из ' + modeText + '. Извлеки ТОЛЬКО товарные позиции.',
+      '',
+      'Правила:',
+      '- Найди колонку с наименованием товара и колонку с количеством',
+      '- Пропусти итоговые строки (Итого, Всего, НДС, Сумма), заголовки, пустые строки',
+      '- Если есть артикул или штрихкод — включи их, иначе null',
+      '- qty — целое число > 0',
+      '- Верни ТОЛЬКО валидный JSON без markdown',
+      '',
+      'Формат: {"items":[{"name":"Название","qty":5,"article":"123","barcode":null}]}',
+      '',
+      'Таблица (колонки разделены табуляцией):',
+      batchText
+    ];
+    const batchPrompt = lines.join(NL);
 
-      log(logId, 'blue', 'Батч ' + (b+1) + '/' + batches.length + '...');
+    log(logId, 'blue', 'Батч ' + (b+1) + ' из ' + batches.length + '...');
+
+    try {
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -898,29 +1032,37 @@ async function parseRowsWithAI(rows, mode, logId) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error?.message || JSON.stringify(data));
-      const text = (data.content || []).find(b => b.type === 'text')?.text || '';
 
-      // Robust JSON extraction — find first { ... } block
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) { log(logId, 'yellow', 'Батч ' + (b+1) + ': нет данных'); continue; }
+      const raw = ((data.content || []).find(x => x.type === 'text') || {}).text || '';
+      const s = raw.indexOf('{');
+      const e = raw.lastIndexOf('}');
+      if (s === -1 || e === -1) { log(logId, 'yellow', 'Батч ' + (b+1) + ': нет JSON'); continue; }
+
       let parsed;
       try {
-        parsed = JSON.parse(match[0]);
-      } catch(parseErr) {
-        // Try to recover truncated JSON by extracting complete item objects
-        const itemMatches = text.matchAll(/\{"name"\s*:\s*"([^"]+)"\s*,\s*"qty"\s*:\s*(\d+)[^}]*\}/g);
+        parsed = JSON.parse(raw.slice(s, e + 1));
+      } catch(pe) {
+        // Fallback: grab complete name+qty pairs
         parsed = { items: [] };
-        for (const m of itemMatches) parsed.items.push({ name: m[1], qty: parseInt(m[2]) });
-        if (parsed.items.length === 0) { log(logId, 'yellow', 'Батч ' + (b+1) + ': не удалось распарсить'); continue; }
+        const re = new RegExp('"name"\\s*:\\s*"([^"]+)"\\s*,\\s*"qty"\\s*:\\s*(\\d+)', 'g');
+        let m;
+        while ((m = re.exec(raw)) !== null) parsed.items.push({ name: m[1], qty: parseInt(m[2]) });
+        if (!parsed.items.length) { log(logId, 'yellow', 'Батч ' + (b+1) + ': не распарсить'); continue; }
       }
-      allItems.push(...(parsed.items || []));
-      log(logId, 'blue', 'Батч ' + (b+1) + ': ' + (parsed.items||[]).length + ' позиций');
-    }
 
-    log(logId, 'green', 'AI распознал итого: <span class="log-name">' + allItems.length + ' позиций</span>');
-    applyItems(allItems, mode, logId);
-  } catch(err) { log(logId, 'red', 'Ошибка AI: ' + err.message); }
+      const items = (parsed.items || []).filter(function(x){ return x.name && x.qty > 0; });
+      allItems.push.apply(allItems, items);
+      log(logId, 'green', 'Батч ' + (b+1) + ': ' + items.length + ' поз.');
+
+    } catch(err) {
+      log(logId, 'red', 'Батч ' + (b+1) + ' ошибка: ' + err.message);
+    }
+  }
+
+  log(logId, 'green', 'Итого: <span class="log-name">' + allItems.length + ' позиций</span>');
+  applyItems(allItems, mode, logId);
 }
+
 
 function parseRows(rows) {
   if (!rows.length) return [];
@@ -1038,6 +1180,7 @@ async function applyItems(items, mode, logId) {
       Object.assign(p, upd);
       try {
         await sbUpdate(p.id, upd);
+        addHistory(mode, p.name, field, before, p[field], p.id, Object.assign({}, p));
         const extra = target === 'ozon' ? ` (Ozon FBO)` : '';
         log(logId,'green',`${mode==='shipment'?'Списано':'Добавлено'}: <span class="log-name">${p.name}</span>${extra} — ${before}→${p[field]}`);
         matched++;
@@ -1050,7 +1193,7 @@ async function applyItems(items, mode, logId) {
       notFound.push(item);
     }
   }
-  saveLocal(); renderTable(); renderUnknown();
+  saveLocal(); renderTable(); renderUnknown(); renderHistory();
   log(logId,'blue','— — —');
   log(logId,'green',`✓ Обработано: ${matched} позиций`);
   if (notFound.length) log(logId,'yellow',`⚠ Не найдено: ${notFound.length} → вкладка «Неизвестные»`);
@@ -1350,7 +1493,7 @@ async function applyBulkArchive() {
       const p = _products.find(x => x.id === id);
       if (p) p.archived = newVal;
     }
-    saveLocal(); renderTable(); clearSelection();
+    saveLocal(); renderTable(); clearSelection(); renderHistory();
     toast(`✅ ${label}: ${ids.length} товаров`);
   } catch(e) { toast('❌ Ошибка: ' + e.message, true); }
   finally { loading(false); }
@@ -1367,7 +1510,7 @@ async function applyBulkDelete() {
       await sbDelete(id);
       _products = _products.filter(p => p.id !== id);
     }
-    saveLocal(); renderTable(); clearSelection();
+    saveLocal(); renderTable(); clearSelection(); renderHistory();
     toast(`🗑 Удалено: ${ids.length} товаров`);
   } catch(e) { toast('❌ Ошибка: ' + e.message, true); }
   finally { loading(false); }
