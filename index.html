@@ -421,11 +421,9 @@ async function doLogin() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error_description || data.msg || 'Ошибка входа');
     const remember = document.getElementById('rememberMe')?.checked;
-    if (remember) {
-      localStorage.setItem('sp_token', data.access_token);
-    } else {
-      sessionStorage.setItem('sp_token', data.access_token);
-    }
+    const storage = remember ? localStorage : sessionStorage;
+    storage.setItem('sp_token', data.access_token);
+    if (data.refresh_token) storage.setItem('sp_refresh', data.refresh_token);
     SB_HEADERS['Authorization'] = 'Bearer ' + data.access_token;
     showApp();
   } catch(e) {
@@ -448,8 +446,8 @@ function checkAuth() {
 }
 
 function doLogout() {
-  localStorage.removeItem('sp_token');
-  sessionStorage.removeItem('sp_token');
+  localStorage.removeItem('sp_token'); localStorage.removeItem('sp_refresh');
+  sessionStorage.removeItem('sp_token'); sessionStorage.removeItem('sp_refresh');
   SB_HEADERS['Authorization'] = 'Bearer ' + SB_KEY;
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('authScreen').style.display = 'flex';
@@ -463,8 +461,40 @@ const SB_URL = 'https://wkuymkrvkeiecckdqgnu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrdXlta3J2a2VpZWNja2RxZ251Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4ODIyNzYsImV4cCI6MjA5MDQ1ODI3Nn0.C0qa10194n9QYih11DZ_xsjWFpT3u5Bcq3ig1Su-ktA';
 const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY };
 
+async function refreshToken() {
+  const refresh = localStorage.getItem('sp_refresh') || sessionStorage.getItem('sp_refresh');
+  if (!refresh) return false;
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({refresh_token: refresh})
+    });
+    const data = await r.json();
+    if (!r.ok) return false;
+    const storage = localStorage.getItem('sp_token') ? localStorage : sessionStorage;
+    storage.setItem('sp_token', data.access_token);
+    if (data.refresh_token) storage.setItem('sp_refresh', data.refresh_token);
+    SB_HEADERS['Authorization'] = 'Bearer ' + data.access_token;
+    return true;
+  } catch(e) { return false; }
+}
+
 async function sbGet() {
-  const r = await fetch(`${SB_URL}/rest/v1/products?select=*&order=id`, { headers: SB_HEADERS });
+  let r = await fetch(`${SB_URL}/rest/v1/products?select=*&order=id`, { headers: SB_HEADERS });
+  if (r.status === 401) {
+    const refreshed = await refreshToken();
+    if (refreshed) {
+      r = await fetch(`${SB_URL}/rest/v1/products?select=*&order=id`, { headers: SB_HEADERS });
+    } else {
+      localStorage.removeItem('sp_token'); localStorage.removeItem('sp_refresh');
+      sessionStorage.removeItem('sp_token'); sessionStorage.removeItem('sp_refresh');
+      document.getElementById('appShell').style.display = 'none';
+      document.getElementById('authScreen').style.display = 'flex';
+      document.getElementById('authErr').textContent = 'Сессия истекла, войдите снова';
+      throw new Error('Сессия истекла');
+    }
+  }
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -814,20 +844,24 @@ async function processPDF(file, mode, logId) {
   reader.onload = async e => {
     const b64 = e.target.result.split(',')[1];
     const modeText = mode==='shipment' ? 'товарной накладной на отгрузку' : 'акта приёмки товара';
-    const prompt = `Ты обрабатываешь ${modeText}.
+    const prompt = `Это ${modeText}.
 
-Извлеки ТОЛЬКО реальные товарные позиции. Игнорируй итоги, заголовки, реквизиты, НДС, пустые строки.
+Твоя задача: извлечь ТОЛЬКО строки с реальными товарными позициями.
 
-Точный маппинг колонок:
-- "Название товара" → name
-- "Артикул" → article  
-- "Barcode" → barcode (строка, не число!)
-- "Доступно к продаже по схеме FBO, шт." → qty_ozon
-- "Текущая цена с учетом скидки, ₽" → price_ozon
-- Количество из накладной (если это накладная) → qty, иначе qty = 0
+Признаки товарной позиции:
+- Имеет наименование (название товара/продукта)
+- Имеет количество (число штук, единиц)
+- Может иметь артикул, штрихкод, единицу измерения
 
-Ответь ТОЛЬКО валидным JSON без markdown и пояснений:
-{"items":[{"name":"название","qty":0,"qty_ozon":число или null,"article":"артикул или null","barcode":"штрихкод строкой или null","price_ozon":число или null}]}`;
+НЕ включай в результат:
+- Итоговые строки (Итого, Всего, Сумма, НДС, Итого с НДС)
+- Заголовки таблиц
+- Реквизиты организаций
+- Номера и даты документов
+- Пустые строки
+
+Ответь ТОЛЬКО JSON без пояснений и markdown:
+{"items":[{"name":"название товара","qty":число,"article":"артикул или null","barcode":"штрихкод строкой или null"}]}`;
     try {
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method:'POST',
