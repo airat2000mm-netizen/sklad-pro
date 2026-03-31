@@ -1435,7 +1435,7 @@ async function parseRowsWithAI_import(rows) {
       'Это таблица товаров для импорта на склад. Извлеки все товарные позиции.',
       '',
       'Правила:',
-      '- Найди колонки: наименование, количество (склад), сектор, артикул, штрихкод, себестоимость, цена Ozon',
+      '- Найди колонки: наименование, количество (склад), сектор, артикул, штрихкод, себестоимость, цена Ozon (price_ozon)',
       '- Пропусти итоговые строки (Итого, Всего, НДС), заголовки, пустые строки',
       '- qty — количество на складе (целое >= 0)',
       '- Верни ТОЛЬКО валидный JSON без markdown',
@@ -1490,7 +1490,7 @@ async function parseRowsWithAI_import(rows) {
 
   log('importLog','green','AI распознал итого: <span class="log-name">' + allItems.length + ' позиций</span>');
   // Convert AI items to the format importRows expects (2D array with header)
-  const header = ['Наименование','Артикул Ozon','Штрихкод Ozon','Сектор','Количество','Себестоимость','Цена продажи','Фото (URL)'];
+  const header = ['Наименование','Артикул Ozon','Штрихкод Ozon','Сектор','Количество','Себестоимость','Цена, руб.','Фото (URL)'];
   const dataArr = allItems.map(function(x){ return [
     x.name||'', x.article||'', x.barcode||'', x.sector||'',
     x.qty||0, x.cost||0, x.price_ozon||0, x.photo||''
@@ -1532,7 +1532,7 @@ async function importRows(rows) {
     // Штрихкод: "barcode", "штрихкод (серийный номер / ean)", "штрихкод"
     const bC  = h.findIndex(c => c === 'barcode' || c.includes('штрихкод') || c.includes('ean') || c.includes('серийный'));
     // Цена: "текущая цена с учетом скидки" (остатки) или "цена, руб.*" (шаблон)
-    const prC = h.findIndex(c => c.includes('текущая цена')||c.includes('цена с учетом')||(c.includes('цена') && c.includes('руб') && !c.includes('до скидки')));
+    const prC = h.findIndex(c => c.includes('текущая цена')||c.includes('цена с учетом')||c.includes('цена продажи')||c.includes('цена ozon')||c.includes('price_ozon')||(c.includes('цена') && c.includes('руб') && !c.includes('до скидки')));
     const coC = h.findIndex(c => c.includes('себестоим')||c.includes('cost')||c.includes('закуп'));
     if (nC < 0) { log('importLog','red','Не найдена колонка «Наименование»'); return; }
     if (sC < 0) { log('importLog','yellow','Колонка «Сектор» не найдена — будет «Не указан»'); }
