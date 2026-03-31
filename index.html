@@ -818,9 +818,7 @@ async function processCsvFile(file, mode, logId) {
     const text = await file.text();
     const rows = parseCsv(text);
     log(logId, 'blue', `Строк в файле: ${rows.length}`);
-    const items = parseRows(rows);
-    log(logId, 'blue', `Распознано позиций: <span class="log-name">${items.length}</span>`);
-    applyItems(items, mode, logId);
+    await parseRowsWithAI(rows, mode, logId);
   } catch(err) { log(logId, 'red', 'Ошибка CSV: ' + err.message); }
 }
 
@@ -830,17 +828,68 @@ async function processCsvFile(file, mode, logId) {
 function processExcel(file, mode, logId) {
   log(logId, 'blue', 'Читаю Excel...');
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const wb = XLSX.read(e.target.result, { type:'array' });
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, defval:'' });
       log(logId, 'blue', `Строк в файле: ${rows.length}`);
-      const items = parseRows(rows);
-      log(logId, 'blue', `Распознано позиций: <span class="log-name">${items.length}</span>`);
-      applyItems(items, mode, logId);
+      await parseRowsWithAI(rows, mode, logId);
     } catch(err) { log(logId, 'red', 'Ошибка Excel: ' + err.message); }
   };
   reader.readAsArrayBuffer(file);
+}
+
+// ============================================================
+// AI PARSING FOR EXCEL / CSV
+// ============================================================
+async function parseRowsWithAI(rows, mode, logId) {
+  const key = localStorage.getItem('sp_apikey');
+  if (!key) { log(logId, 'red', 'API ключ не задан. Обновите страницу.'); return; }
+
+  // Limit to first 200 rows to avoid token overflow, keep header
+  const sample = rows.slice(0, 200);
+  const tableText = sample.map(r => r.map(c => String(c ?? '').trim()).join('	')).join('
+');
+  const modeText = mode === 'shipment' ? 'товарной накладной на отгрузку' : 'акта приёмки товара';
+
+  log(logId, 'blue', '✨ AI анализирует таблицу...');
+
+  const prompt = `Это таблица из ${modeText}. Извлеки товарные позиции.
+
+Правила:
+- Найди колонку с наименованием товара и колонку с количеством
+- Пропусти итоговые строки (Итого, Всего, НДС), заголовки, пустые строки
+- Если есть артикул или штрихкод — включи их
+- qty должно быть целым числом > 0
+
+Ответь ТОЛЬКО JSON без пояснений и markdown:
+{"items":[{"name":"название товара","qty":число,"article":"артикул или null","barcode":"штрихкод или null"}]}
+
+Таблица:
+${tableText}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error?.message || JSON.stringify(data));
+    const text = (data.content || []).find(b => b.type === 'text')?.text || '';
+    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+    log(logId, 'green', `AI распознал <span class="log-name">${parsed.items.length} позиций</span>`);
+    applyItems(parsed.items, mode, logId);
+  } catch(err) { log(logId, 'red', 'Ошибка AI: ' + err.message); }
 }
 
 function parseRows(rows) {
