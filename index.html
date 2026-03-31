@@ -430,10 +430,15 @@ async function doLogin() {
   } finally { loading(false); }
 }
 
-function showApp() {
+async function showApp() {
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('appShell').style.display = 'block';
-  init();
+  askApiKey();
+  loading(true);
+  await fetchProducts();
+  loading(false);
+  renderTable();
+  renderUnknown();
 }
 
 function checkAuth() {
@@ -553,13 +558,8 @@ let _unknown = JSON.parse(localStorage.getItem('sp_unknown') || '[]');
 // ============================================================
 // BOOT
 // ============================================================
-document.addEventListener('DOMContentLoaded', async () => {
-  askApiKey();
-  loading(true);
-  await fetchProducts();
-  loading(false);
-  renderTable();
-  renderUnknown();
+document.addEventListener('DOMContentLoaded', () => {
+  checkAuth();
 });
 
 function askApiKey() {
